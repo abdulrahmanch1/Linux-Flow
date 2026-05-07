@@ -1,0 +1,63 @@
+use crate::error::DaemonError;
+use std::{
+    io::Write,
+    process::{Command, Stdio},
+};
+
+#[derive(Clone, Copy)]
+pub enum DisplayServer {
+    Wayland,
+    X11,
+    Unknown,
+}
+
+pub fn detect_display() -> DisplayServer {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        DisplayServer::Wayland
+    } else if std::env::var_os("DISPLAY").is_some() {
+        DisplayServer::X11
+    } else {
+        DisplayServer::Unknown
+    }
+}
+
+/// Writes `text` to the system clipboard using the appropriate tool.
+pub fn clipboard_write(display: DisplayServer, text: &str) -> Result<(), DaemonError> {
+    match display {
+        DisplayServer::Wayland => pipe("wl-copy", &[], text),
+        DisplayServer::X11 => pipe("xclip", &["-selection", "clipboard"], text),
+        DisplayServer::Unknown => Err(DaemonError::InjectionFailed("no display server".into())),
+    }
+}
+
+/// Clears the system clipboard immediately after injection.
+pub fn clipboard_clear(display: DisplayServer) {
+    match display {
+        DisplayServer::Wayland => {
+            let _ = Command::new("wl-copy").arg("--clear").status();
+        }
+        DisplayServer::X11 => {
+            let _ = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::null())
+                .status();
+        }
+        DisplayServer::Unknown => {}
+    }
+}
+
+fn pipe(cmd: &str, args: &[&str], text: &str) -> Result<(), DaemonError> {
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| DaemonError::InjectionFailed(format!("{cmd}: {e}")))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| DaemonError::InjectionFailed(format!("{cmd}: no stdin")))?;
+    stdin.write_all(text.as_bytes()).map_err(DaemonError::Io)?;
+    drop(stdin);
+    child.wait().map_err(DaemonError::Io)?;
+    Ok(())
+}

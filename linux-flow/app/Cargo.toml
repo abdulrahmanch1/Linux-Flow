@@ -1,0 +1,22 @@
+[package]
+name = "linux-flow"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+linux-flow-shared = { path = "../shared" }
+tokio = { version = "1", features = ["full"] }
+gtk4 = { version = "0.9", features = ["v4_12"] }
+libadwaita = { version = "0.7", features = ["v1_5"] }
+pipewire = "0.8"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "1"
+zeroize = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-journald = "0.3"
+tracing-subscriber = "0.3"
