@@ -32,7 +32,7 @@
 
 ## Phase 4 — Audio
 
-- [ ] **TASK-08** — Implement PTT audio capture via PipeWire. Mic opens on start, closes fully on stop. Returns raw PCM bytes. Format per PRD Section 6. Nothing written to disk.
+- [x] **TASK-08** — Implement PTT audio capture via PipeWire. Mic opens on start, closes fully on stop. Returns raw PCM bytes. Format per PRD Section 6. Nothing written to disk.
 
 ---
 

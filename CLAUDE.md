@@ -41,8 +41,11 @@ linux-flow/
         └── uinput.rs
 ```
 
+## Session Rule — One Task Per Session
+**Implement exactly one TASK per session.** Do not move to the next task automatically. After completing a task and committing, stop and wait for the user to explicitly request the next task.
+
 ## Testing Rule
-After every code edit run `cargo check --workspace` (from `linux-flow/`). If it passes:
+After every code edit run `cargo clippy --workspace -- -D warnings` (from `linux-flow/`). If it passes:
 1. Verify the task is fully complete — every requirement in `TASKS.md` for that task is implemented, nothing skipped or stubbed without intent.
 2. Mark the completed task(s) in `TASKS.md` by changing `[ ]` to `[x]`.
 3. Commit and push to GitHub with a descriptive message. Do not wait for the user to ask.
@@ -66,3 +69,9 @@ After every code edit run `cargo check --workspace` (from `linux-flow/`). If it 
 8. **Injection:** `/dev/uinput` exclusively via the daemon process. Synchronize key events to prevent character dropping.
 
 9. **Comments:** Never reference task names, phases, or issue numbers in code comments or identifiers. That context belongs in commit messages only.
+
+10. **OpenRouter:** Before writing any code that calls OpenRouter, fetch and read the official documentation at `https://openrouter.ai/docs` first. No exceptions.
+
+11. **Code Quality:** Write for extensibility — clean abstractions, single responsibility, no shortcuts that create future debt. Clippy must pass with zero warnings.
+
+12. **Pipeline Latency:** End-to-end latency (hotkey release → first injected keystroke) is a core product metric (target: < 1,600ms p90). Never add unnecessary buffering, polling, or blocking calls on the hot path. Every architectural decision on the ASR/LLM/IPC path must be justified against this budget.

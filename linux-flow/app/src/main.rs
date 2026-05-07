@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod asr;
 mod audio;
 mod hotkey;
