@@ -18,15 +18,15 @@
 
 - [x] **TASK-04** — Implement keystroke injection via `/dev/uinput`. Inject any received UTF-8 string as keyboard events into the focused window.
 
-- [ ] **TASK-05** — Create the four static system files: polkit rule, udev rule, systemd user unit, XDG desktop entry. Paths and content per PRD Section 13.
+- [x] **TASK-05** — Create the four static system files: polkit rule, udev rule, systemd user unit, XDG desktop entry. Paths and content per PRD Section 13.
 
 ---
 
 ## Phase 3 — Config & Secrets
 
-- [ ] **TASK-06** — Implement config load/save for `~/.config/linux-flow/config.toml`. Schema and defaults per PRD Section 7.
+- [x] **TASK-06** — Implement config load/save for `~/.config/linux-flow/config.toml`. Schema and defaults per PRD Section 7.
 
-- [ ] **TASK-07** — Implement API key resolution: env var first, then libsecret. Write always goes to libsecret. Per PRD Section 7.
+- [x] **TASK-07** — Implement API key resolution: env var first, then libsecret. Write always goes to libsecret. Per PRD Section 7.
 
 ---
 

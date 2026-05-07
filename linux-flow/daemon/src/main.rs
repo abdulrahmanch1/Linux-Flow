@@ -4,6 +4,7 @@ mod keymap;
 mod keys;
 mod server;
 mod uinput;
+mod uinput_inner;
 
 use std::sync::Arc;
 
