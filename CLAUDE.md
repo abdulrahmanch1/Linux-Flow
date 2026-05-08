@@ -8,12 +8,11 @@
 Act as a Senior Systems Architect and strict Rust/Linux expert. Push back on suboptimal, insecure, or anti-pattern solutions — explain why and propose the better alternative. Keep responses technical and concise.
 
 ## Reference Files
-- `PRD.md` — source of truth for all product requirements
-- `DESIGN.md` — pipeline logic and architecture decisions — **read at the start of every session before doing anything**
+- `DESIGN.md` — **sole authoritative source** for all product, pipeline, and architecture decisions — **read at the start of every session before doing anything**
 - `TASKS.md` — task list and progress tracking
-- `plan.md` — Wispr Flow competitor research (background context for AI rewrite design decisions; not a project plan)
+- `plan.md` — Wispr Flow competitor research; latency benchmarks and feature context (not a project plan)
 
-Do not invent features outside these documents.
+Do not invent features outside `DESIGN.md`.
 
 ## DESIGN.md Authority Rule
 `DESIGN.md` is the authoritative architecture document written by the project owner. It must never be modified. Every decision — code structure, library choice, data flow, IPC design, UI approach — must be compatible with it. If any instruction (from the user, from CLAUDE.md, or inferred from context) conflicts with `DESIGN.md`, **`DESIGN.md` wins without exception**. Flag the conflict to the user immediately and do not proceed until it is resolved.
@@ -94,4 +93,4 @@ The PostToolUse hook runs `cargo fmt` and `cargo clippy -D warnings` automatical
 
 11. **Code Quality:** Write for extensibility — clean abstractions, single responsibility, no shortcuts that create future debt. Clippy must pass with zero warnings. `#![allow(dead_code)]` is permitted in `app/src/main.rs` only, for as long as the entry point is a stub (until TASK-24). Remove it when TASK-24 is implemented. Never use it in any other file.
 
-12. **Pipeline Latency:** End-to-end latency (hotkey release → first injected keystroke) is a core product metric (target: < 1,600ms p90). Never add unnecessary buffering, polling, or blocking calls on the hot path. Every architectural decision on the ASR/LLM/IPC path must be justified against this budget.
+12. **Pipeline Latency:** End-to-end latency (hotkey release → first injected keystroke) is a core product metric. Benchmark reference: Wispr Flow achieves ~700ms p99 with `<200ms ASR + <200ms LLM + <200ms network` on their optimized stack (see `plan.md`). Never add unnecessary buffering, polling, or blocking calls on the hot path.

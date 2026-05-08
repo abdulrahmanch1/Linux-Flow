@@ -1,6 +1,6 @@
 # linux-flow — Tasks
 
-> Read `@PRD.md` before starting.
+> Read `DESIGN.md` before starting any task.
 
 ---
 
@@ -8,7 +8,7 @@
 
 - [x] **TASK-01** — Create Cargo workspace with two binary crates: the main user-space process and the privileged helper.
 
-- [x] **TASK-02** — Add all required dependencies to each crate based on the tech stack in PRD Section 2.
+- [x] **TASK-02** — Add all required dependencies to each crate based on the tech stack in `DESIGN.md`.
 
 ---
 
@@ -18,21 +18,21 @@
 
 - [x] **TASK-04** — Implement keystroke injection via `/dev/uinput`. Inject any received UTF-8 string as keyboard events into the focused window.
 
-- [x] **TASK-05** — Create the four static system files: polkit rule, udev rule, systemd user unit, XDG desktop entry. Paths and content per PRD Section 13.
+- [x] **TASK-05** — Create the four static system files: polkit rule, udev rule, systemd user unit, XDG desktop entry. Paths per `DESIGN.md` Distribution section.
 
 ---
 
 ## Phase 3 — Config & Secrets
 
-- [x] **TASK-06** — Implement config load/save for `~/.config/linux-flow/config.toml`. Schema and defaults per PRD Section 7.
+- [x] **TASK-06** — Implement config load/save for `~/.config/linux-flow/config.toml`. Schema and defaults per `DESIGN.md` Storage section.
 
-- [x] **TASK-07** — Implement API key resolution: env var first, then libsecret. Write always goes to libsecret. Per PRD Section 7.
+- [x] **TASK-07** — Implement API key resolution: env var first, then libsecret. Write always goes to libsecret. Per `DESIGN.md` Storage section.
 
 ---
 
 ## Phase 4 — Audio
 
-- [x] **TASK-08** — Implement PTT audio capture via PipeWire. Mic opens on start, closes fully on stop. Returns raw PCM bytes. Format per PRD Section 6. Nothing written to disk.
+- [x] **TASK-08** — Implement PTT audio capture via PipeWire. Mic opens on start, closes fully on stop. Returns raw PCM bytes. Format: PCM S16LE, 16 kHz, mono. Nothing written to disk.
 
 ---
 
@@ -50,43 +50,43 @@
 
 ## Phase 6 — Cloud Pipeline
 
-- [x] **TASK-13** — Implement Soniox WebSocket ASR client. Stream PCM audio, return final transcript. Connection timeout: 3s. Stream timeout: 8s. Per PRD Sections 5 and 10.
+- [x] **TASK-13** — Implement Soniox WebSocket ASR client. Stream PCM audio, return final transcript. Connection timeout: 3s. Stream timeout: 8s after EOS.
 
-- [x] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with system prompt from PRD Section 8. Return cleaned text. Timeout 5s.
+- [x] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with the system prompt from `DESIGN.md` Pipeline section. Return cleaned text. Timeout 5s.
 
-- [x] **TASK-15** — Implement pipeline orchestrator. On hotkey press: start audio. On release: stop audio → Soniox → OpenRouter (fall back to raw on LLM error) → send to helper via socket. Emit pipeline events per PRD Section 10.
+- [x] **TASK-15** — Implement pipeline orchestrator. On hotkey press: start audio. On release: stop audio → Soniox → OpenRouter (fall back to raw on LLM error) → send to helper via socket. Emit `PipelineEvent` variants for tray and notification wiring.
 
 ---
 
 ## Phase 7 — Tray
 
-- [ ] **TASK-16** — Implement tray icon via StatusNotifierItem. Four states: Idle, Recording, Processing, Error. Wave animation at ~10fps for Recording. Right-click menu with Settings, About, Quit. Per PRD Section 9.1.
+- [ ] **TASK-16** — Implement tray icon via StatusNotifierItem. Four states: Idle, Recording, Processing, Error. Canned-loop wave animation at ~10fps for Recording state. Right-click menu: "linux-flow" label (non-clickable), separator, Settings…, About, separator, Quit.
 
 ---
 
 ## Phase 8 — Wizard
 
-- [ ] **TASK-17** — Implement wizard page 1: Soniox API key entry.
+- [ ] **TASK-17** — Implement wizard page 1: Soniox API key entry. Validate non-empty before proceeding.
 
-- [ ] **TASK-18** — Implement wizard page 2: OpenRouter API key and model entry.
+- [ ] **TASK-18** — Implement wizard page 2: OpenRouter API key and model entry. Pre-fill model with default from `DESIGN.md`. Validate both non-empty.
 
-- [ ] **TASK-19** — Implement wizard page 3: hotkey setup via platform portal or key-capture widget.
+- [ ] **TASK-19** — Implement wizard page 3: hotkey setup. On Wayland: XDG GlobalShortcuts portal. On X11: key-capture widget. Default Right Ctrl. Show success/failure before proceeding.
 
-- [ ] **TASK-20** — Implement wizard page 4: polkit authorization.
+- [ ] **TASK-20** — Implement wizard page 4: polkit authorization. Explain why polkit is needed, "Authorize" button triggers polkit dialog.
 
-- [ ] **TASK-21** — Implement wizard completion: persist keys and config, show tray. Auto-show wizard on startup if config or keys are missing. Per PRD Section 9.2.
+- [ ] **TASK-21** — Implement wizard completion: write keys to libsecret, save `config.toml`, show tray. Auto-show wizard on startup if config or keys are missing.
 
 ---
 
 ## Phase 9 — Settings
 
-- [ ] **TASK-22** — Implement settings window with all groups and rows per PRD Section 9.3. Changes apply immediately without restart.
+- [ ] **TASK-22** — Implement settings window (`AdwPreferencesWindow`, GTK4 + libadwaita). Rows: hotkey, OpenRouter model, Soniox language, Soniox key (change), OpenRouter key (change). Changes apply immediately without restart.
 
 ---
 
 ## Phase 10 — Notifications
 
-- [ ] **TASK-23** — Wire all pipeline events to tray state changes and toast notifications using exact messages from PRD Section 10.
+- [ ] **TASK-23** — Wire all `PipelineEvent` variants to tray state changes and desktop notifications (libnotify when no window is open, `AdwToast` when a window is open).
 
 ---
 
@@ -98,6 +98,6 @@
 
 ## Phase 12 — Distribution
 
-- [ ] **TASK-25** — Write `install.sh` per PRD Section 13.
+- [ ] **TASK-25** — Write `install.sh` per `DESIGN.md` Distribution section.
 
-- [ ] **TASK-26** — Write `uninstall.sh` per PRD Section 13.
+- [ ] **TASK-26** — Write `uninstall.sh` per `DESIGN.md` Distribution section.

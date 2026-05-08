@@ -143,10 +143,11 @@ async fn inject_text(text: &str) -> Result<(), String> {
         .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
     let mut stream = UnixStream::connect(format!("{dir}/linux-flow-helper.sock")).await
         .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
-    let frame = encode_frame(&IpcRequest::InjectText { text: text.to_owned() })
+    let mut frame = encode_frame(&IpcRequest::InjectText { text: text.to_owned() })
         .map_err(|e| e.to_string())?;
-    stream.write_all(&frame).await
-        .map_err(|_| "Could not inject text into the focused window.".to_string())?;
+    let write_result = stream.write_all(&frame).await;
+    frame.zeroize();
+    write_result.map_err(|_| "Could not inject text into the focused window.".to_string())?;
     let mut resp = [0u8; 1];
     stream.read_exact(&mut resp).await
         .map_err(|_| "Could not inject text into the focused window.".to_string())?;
