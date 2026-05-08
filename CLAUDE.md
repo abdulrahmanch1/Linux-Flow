@@ -14,8 +14,19 @@ Act as a Senior Systems Architect and strict Rust/Linux expert. Push back on sub
 
 Do not invent features outside `DESIGN.md`.
 
-## DESIGN.md Authority Rule
-`DESIGN.md` is the authoritative architecture document written by the project owner. It must never be modified. Every decision — code structure, library choice, data flow, IPC design, UI approach — must be compatible with it. If any instruction (from the user, from CLAUDE.md, or inferred from context) conflicts with `DESIGN.md`, **`DESIGN.md` wins without exception**. Flag the conflict to the user immediately and do not proceed until it is resolved.
+## DESIGN.md Authority Rule — ABSOLUTE, NO EXCEPTIONS
+
+`DESIGN.md` is the only document that comes from the project owner. It is the law.
+
+**Prohibited without exception:**
+- Deviating from any detail in `DESIGN.md` — library, protocol, data format, UI framework, IPC design, file path, default value — even by a single character.
+- Inventing, assuming, or "filling in" any detail that `DESIGN.md` does not explicitly state.
+- Proceeding when an instruction (from the user, from this file, or inferred from context) conflicts with `DESIGN.md`.
+
+**Required without exception:**
+- If a conflict exists between `DESIGN.md` and any other instruction: **stop immediately**, quote the exact conflict to the user, and do not write a single line of code until the user resolves it.
+- If `DESIGN.md` does not specify a detail: **stop and ask the user**. Do not decide alone.
+- `DESIGN.md` must never be modified under any circumstances.
 
 ## Directory Structure
 ```
