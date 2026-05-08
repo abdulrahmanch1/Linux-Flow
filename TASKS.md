@@ -54,7 +54,7 @@
 
 - [x] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with system prompt from PRD Section 8. Return cleaned text. Timeout 5s.
 
-- [ ] **TASK-15** — Implement pipeline orchestrator. On hotkey press: start audio. On release: stop audio → Soniox → OpenRouter (fall back to raw on LLM error) → send to helper via socket. Emit pipeline events per PRD Section 10.
+- [x] **TASK-15** — Implement pipeline orchestrator. On hotkey press: start audio. On release: stop audio → Soniox → OpenRouter (fall back to raw on LLM error) → send to helper via socket. Emit pipeline events per PRD Section 10.
 
 ---
 
