@@ -44,7 +44,7 @@
 
 - [x] **TASK-11** — Implement X11 hotkey via XGrabKey in a dedicated thread.
 
-- [ ] **TASK-12** — Implement hotkey manager that dispatches to the correct backend and emits press/release events.
+- [x] **TASK-12** — Implement hotkey manager that dispatches to the correct backend and emits press/release events.
 
 ---
 
