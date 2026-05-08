@@ -42,7 +42,7 @@
 
 - [x] **TASK-10** — Implement Wayland hotkey registration via XDG GlobalShortcuts portal.
 
-- [ ] **TASK-11** — Implement X11 hotkey via XGrabKey in a dedicated thread.
+- [x] **TASK-11** — Implement X11 hotkey via XGrabKey in a dedicated thread.
 
 - [ ] **TASK-12** — Implement hotkey manager that dispatches to the correct backend and emits press/release events.
 
