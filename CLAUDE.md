@@ -9,52 +9,76 @@ Act as a Senior Systems Architect and strict Rust/Linux expert. Push back on sub
 
 ## Reference Files
 - `PRD.md` — source of truth for all product requirements
-- `DESIGN.md` — pipeline logic and architecture decisions
+- `DESIGN.md` — pipeline logic and architecture decisions — **read at the start of every session before doing anything**
 - `TASKS.md` — task list and progress tracking
 - `plan.md` — Wispr Flow competitor research (background context for AI rewrite design decisions; not a project plan)
 
 Do not invent features outside these documents.
 
+## DESIGN.md Authority Rule
+`DESIGN.md` is the authoritative architecture document written by the project owner. It must never be modified. Every decision — code structure, library choice, data flow, IPC design, UI approach — must be compatible with it. If any instruction (from the user, from CLAUDE.md, or inferred from context) conflicts with `DESIGN.md`, **`DESIGN.md` wins without exception**. Flag the conflict to the user immediately and do not proceed until it is resolved.
+
 ## Directory Structure
 ```
 linux-flow/
 ├── Cargo.toml                        # workspace root
+├── deny.toml                         # cargo-deny policy (licenses, bans, advisories)
 ├── shared/
 │   ├── Cargo.toml                    # lib crate
 │   └── src/
 │       ├── lib.rs
 │       ├── config.rs
+│       ├── display.rs
 │       └── ipc_proto.rs
 ├── app/
 │   ├── Cargo.toml                    # binary crate (linux-flow)
 │   └── src/
-│       ├── main.rs
-│       ├── audio.rs
-│       ├── asr.rs
-│       ├── llm.rs
-│       ├── hotkey.rs
-│       └── ui.rs
+│       ├── main.rs                   # entry point stub; #![allow(dead_code)] until TASK-24
+│       ├── audio.rs                  # PipeWire PTT capture
+│       ├── secrets.rs                # libsecret API key resolution
+│       ├── asr.rs                    # Soniox WebSocket client (stub)
+│       ├── llm.rs                    # OpenRouter REST client (stub)
+│       ├── hotkey.rs                 # hotkey manager — display detection done (TASK-09); backends TASK-10-12
+│       ├── pipeline.rs               # pipeline orchestrator (stub)
+│       ├── tray.rs                   # StatusNotifierItem tray (stub)
+│       ├── wizard.rs                 # first-run wizard (stub)
+│       ├── settings.rs               # settings window (stub)
+│       ├── notifications.rs          # toast + libnotify (stub)
+│       └── ui.rs                     # shared UI helpers (stub)
 └── daemon/
     ├── Cargo.toml                    # binary crate (linux-flow-helper)
     └── src/
         ├── main.rs
-        └── uinput.rs
+        ├── server.rs                 # Unix socket server
+        ├── uinput.rs                 # public uinput API
+        ├── uinput_inner.rs           # ioctl + device setup
+        ├── keymap.rs                 # char → evdev key table
+        ├── keys.rs                   # key event helpers
+        ├── clipboard.rs              # wl-copy / xclip transport
+        └── error.rs                  # daemon error types
 ```
 
 ## Session Rule — One Task Per Session
 **Implement exactly one TASK per session.** Do not move to the next task automatically. After completing a task and committing, stop and wait for the user to explicitly request the next task.
 
+## Memory Update Rule
+After committing each completed task, update the project architecture snapshot at `~/.claude/projects/-home-abdulrahmanchibon-Hani-pro/memory/project_arch.md`:
+- Mark the task as complete and update its file entry from "stub" to a one-line description
+- Record any architectural decision that isn't obvious from the code
+- Update "المهمة التالية" to the next pending task
+This keeps future sessions from re-exploring files that haven't changed.
+
 ## Testing Rule
-After every code edit run `cargo clippy --workspace -- -D warnings` (from `linux-flow/`). If it passes:
+The PostToolUse hook runs `cargo fmt` and `cargo clippy -D warnings` automatically on every `.rs` save — do not run them manually. When the hook passes:
 1. Verify the task is fully complete — every requirement in `TASKS.md` for that task is implemented, nothing skipped or stubbed without intent.
 2. Mark the completed task(s) in `TASKS.md` by changing `[ ]` to `[x]`.
-3. Commit and push to GitHub with a descriptive message. Do not wait for the user to ask.
+3. Commit with a descriptive message. Push only if a remote is configured (`git remote -v` returns output). Do not wait for the user to ask.
 
 ## Coding Rules
 
-1. **Separation:** Maintain strict separation between `shared/`, `app/`, and `daemon/`. Max 150 lines per file — after writing any file run `wc -l` to verify; estimation is not acceptable.
+1. **Separation:** Maintain strict separation between `shared/`, `app/`, and `daemon/`. Target max 150 lines per file — after writing any file run `wc -l` to verify; estimation is not acceptable. Exceptions are permitted only when splitting would genuinely harm correctness, cohesion, or performance (e.g. large data/lookup tables, tightly-coupled state machines, unsafe blocks with shared invariants, protocol implementations tied to an external spec). If a file exceeds 150 lines for one of these reasons, document the justification in the commit message; do not split artificially just to satisfy the limit.
 
-2. **Async:** Use `tokio` for all I/O, ASR, and LLM tasks.
+2. **Async:** Use `tokio` for all I/O, ASR, and LLM tasks. Exception: PipeWire audio capture requires a dedicated OS thread (`std::thread::spawn`) because the PipeWire main loop is not `Send` and is incompatible with tokio. Communicate from that thread to the async world via `tokio::sync::mpsc`.
 
 3. **IPC:** Unix Domain Socket with a 4-byte big-endian length prefix + UTF-8 payload. Verify `ucred` (PID/UID) on all connections.
 
@@ -62,7 +86,7 @@ After every code edit run `cargo clippy --workspace -- -D warnings` (from `linux
 
 5. **Error Handling:** `.unwrap()`, `.expect()`, and `panic!()` are forbidden. Use `thiserror` for module-specific error types.
 
-6. **Zero Persistence:** Audio and transcripts in RAM only. No disk writes, no `/tmp`, no telemetry.
+6. **Zero Persistence:** Audio and transcripts in RAM only. No disk writes, no `/tmp`, no telemetry. This rule applies to application code only — tooling scripts (hooks, install.sh) are exempt.
 
 7. **Memory Safety:** Apply `Zeroize` to all API key and transcript buffers immediately after use — this includes every representation: both the decoded object (e.g. `String`) and the raw bytes that carried it (e.g. `Vec<u8>`).
 
@@ -72,6 +96,6 @@ After every code edit run `cargo clippy --workspace -- -D warnings` (from `linux
 
 10. **OpenRouter:** Before writing any code that calls OpenRouter, fetch and read the official documentation at `https://openrouter.ai/docs` first. No exceptions.
 
-11. **Code Quality:** Write for extensibility — clean abstractions, single responsibility, no shortcuts that create future debt. Clippy must pass with zero warnings.
+11. **Code Quality:** Write for extensibility — clean abstractions, single responsibility, no shortcuts that create future debt. Clippy must pass with zero warnings. `#![allow(dead_code)]` is permitted in `app/src/main.rs` only, for as long as the entry point is a stub (until TASK-24). Remove it when TASK-24 is implemented. Never use it in any other file.
 
 12. **Pipeline Latency:** End-to-end latency (hotkey release → first injected keystroke) is a core product metric (target: < 1,600ms p90). Never add unnecessary buffering, polling, or blocking calls on the hot path. Every architectural decision on the ASR/LLM/IPC path must be justified against this budget.
