@@ -50,7 +50,7 @@
 
 ## Phase 6 — Cloud Pipeline
 
-- [ ] **TASK-13** — Implement Soniox WebSocket ASR client. Stream PCM audio, return final transcript. Connection timeout: 3s. Stream timeout: 8s. Per PRD Sections 5 and 10.
+- [x] **TASK-13** — Implement Soniox WebSocket ASR client. Stream PCM audio, return final transcript. Connection timeout: 3s. Stream timeout: 8s. Per PRD Sections 5 and 10.
 
 - [ ] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with system prompt from PRD Section 8. Return cleaned text. Timeout 5s.
 
