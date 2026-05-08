@@ -1,5 +1,18 @@
-pub use linux_flow_shared::display::DisplayServer;
+#[path = "hotkey_wayland.rs"]
+pub(crate) mod wayland_backend;
 
-pub fn detect_display() -> DisplayServer {
-    linux_flow_shared::display::detect()
+use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyEvent {
+    Pressed,
+    Released,
+}
+
+#[derive(Debug, Error)]
+pub enum HotkeyError {
+    #[error("portal error: {0}")]
+    Portal(#[from] ashpd::Error),
+    #[error("event stream closed unexpectedly")]
+    StreamClosed,
 }

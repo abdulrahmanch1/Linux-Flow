@@ -40,7 +40,7 @@
 
 - [x] **TASK-09** — Detect display server at runtime (Wayland vs X11).
 
-- [ ] **TASK-10** — Implement Wayland hotkey registration via XDG GlobalShortcuts portal.
+- [x] **TASK-10** — Implement Wayland hotkey registration via XDG GlobalShortcuts portal.
 
 - [ ] **TASK-11** — Implement X11 hotkey via XGrabKey in a dedicated thread.
 
