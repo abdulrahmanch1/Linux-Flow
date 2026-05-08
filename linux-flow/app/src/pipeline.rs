@@ -139,9 +139,10 @@ impl Pipeline {
 }
 
 async fn inject_text(text: &str) -> Result<(), String> {
-    let dir = std::env::var("XDG_RUNTIME_DIR")
-        .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
-    let mut stream = UnixStream::connect(format!("{dir}/linux-flow-helper.sock")).await
+    // SAFETY: getuid() has no preconditions and always succeeds on Linux.
+    let uid = unsafe { libc::getuid() };
+    let path = format!("/run/user/{uid}/linux-flow-helper.sock");
+    let mut stream = UnixStream::connect(&path).await
         .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
     let mut frame = encode_frame(&IpcRequest::InjectText { text: text.to_owned() })
         .map_err(|e| e.to_string())?;
