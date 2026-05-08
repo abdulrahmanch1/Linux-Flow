@@ -13,5 +13,5 @@ mod ui;
 mod wizard;
 
 fn main() {
-    // TODO: TASK-24 — implement entry point
+    // TODO: implement entry point
 }
