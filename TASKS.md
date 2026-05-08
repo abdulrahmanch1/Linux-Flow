@@ -38,7 +38,7 @@
 
 ## Phase 5 — Hotkey
 
-- [ ] **TASK-09** — Detect display server at runtime (Wayland vs X11).
+- [x] **TASK-09** — Detect display server at runtime (Wayland vs X11).
 
 - [ ] **TASK-10** — Implement Wayland hotkey registration via XDG GlobalShortcuts portal.
 

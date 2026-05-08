@@ -1,24 +1,13 @@
 use crate::error::DaemonError;
+use linux_flow_shared::display::detect;
+pub use linux_flow_shared::display::DisplayServer;
 use std::{
     io::Write,
     process::{Command, Stdio},
 };
 
-#[derive(Clone, Copy)]
-pub enum DisplayServer {
-    Wayland,
-    X11,
-    Unknown,
-}
-
 pub fn detect_display() -> DisplayServer {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        DisplayServer::Wayland
-    } else if std::env::var_os("DISPLAY").is_some() {
-        DisplayServer::X11
-    } else {
-        DisplayServer::Unknown
-    }
+    detect()
 }
 
 /// Writes `text` to the system clipboard using the appropriate tool.
