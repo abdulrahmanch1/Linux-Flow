@@ -52,7 +52,7 @@
 
 - [x] **TASK-13** — Implement Soniox WebSocket ASR client. Stream PCM audio, return final transcript. Connection timeout: 3s. Stream timeout: 8s. Per PRD Sections 5 and 10.
 
-- [ ] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with system prompt from PRD Section 8. Return cleaned text. Timeout 5s.
+- [x] **TASK-14** — Implement OpenRouter LLM client. Send raw transcript with system prompt from PRD Section 8. Return cleaned text. Timeout 5s.
 
 - [ ] **TASK-15** — Implement pipeline orchestrator. On hotkey press: start audio. On release: stop audio → Soniox → OpenRouter (fall back to raw on LLM error) → send to helper via socket. Emit pipeline events per PRD Section 10.
 
