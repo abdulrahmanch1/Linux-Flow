@@ -6,13 +6,24 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; [[ \"$f\" == /home/abdulrahmanchibon/Hani-pro/linux-flow/*.rs || \"$f\" == /home/abdulrahmanchibon/Hani-pro/linux-flow/**/*.rs ]] && cd /home/abdulrahmanchibon/Hani-pro/linux-flow && ~/.cargo/bin/cargo fmt --all && ~/.cargo/bin/cargo clippy --workspace -- -D warnings; } 2>/dev/null || true",
-            "statusMessage": "fmt + clippy..."
+            "command": "cat | bash /home/abdulrahmanchibon/Hani-pro/linux-flow/.claude/hooks/check.sh",
+            "statusMessage": "fmt → clippy → line-count..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/abdulrahmanchibon/Hani-pro/linux-flow/.claude/hooks/full-check.sh",
+            "statusMessage": "build → test → doc → audit → deny..."
           },
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; [[ \"$f\" == /home/abdulrahmanchibon/Hani-pro/linux-flow/*.rs || \"$f\" == /home/abdulrahmanchibon/Hani-pro/linux-flow/**/*.rs ]] && lines=$(wc -l < \"$f\") && (( lines > 150 )) && echo \"{\\\"systemMessage\\\": \\\"⚠ $(basename $f) = $lines lines (limit: 150)\\\"}\" ; } 2>/dev/null || true",
-            "statusMessage": "checking line count..."
+            "command": "bash /home/abdulrahmanchibon/Hani-pro/linux-flow/.claude/hooks/update_memory.sh",
+            "statusMessage": "updating memory..."
           }
         ]
       }
