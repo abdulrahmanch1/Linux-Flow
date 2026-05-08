@@ -1,18 +1,19 @@
 use gtk4::{glib, prelude::*};
 use libadwaita::{self as adw, prelude::*};
 use std::{cell::RefCell, rc::Rc};
+use zeroize::Zeroizing;
 
 pub(crate) struct WizardState {
-    pub soniox_key: String,
-    pub openrouter_key: String,
+    pub soniox_key: Zeroizing<String>,
+    pub openrouter_key: Zeroizing<String>,
     pub model: String,
 }
 
 impl Default for WizardState {
     fn default() -> Self {
         Self {
-            soniox_key: String::new(),
-            openrouter_key: String::new(),
+            soniox_key: Zeroizing::new(String::new()),
+            openrouter_key: Zeroizing::new(String::new()),
             model: linux_flow_shared::config::Config::default().llm.model,
         }
     }
@@ -44,8 +45,8 @@ fn page_soniox(state: Rc<RefCell<WizardState>>) -> adw::NavigationPage {
     }));
 
     next.connect_clicked(glib::clone!(#[weak] entry, #[strong] state, move |_| {
-        state.borrow_mut().soniox_key = entry.text().to_string();
-        // TASK-18: nav.push(&page_openrouter(nav.clone(), Rc::clone(&state)));
+        state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
+        // page_openrouter will be pushed here
     }));
 
     let group = adw::PreferencesGroup::new();

@@ -1,1 +1,1 @@
-// TASK-22 — settings window
+// settings window (stub)
