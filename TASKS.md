@@ -66,7 +66,7 @@
 
 ## Phase 8 — Wizard
 
-- [ ] **TASK-17** — Implement wizard page 1: Soniox API key entry. Validate non-empty before proceeding.
+- [x] **TASK-17** — Implement wizard page 1: Soniox API key entry. Validate non-empty before proceeding.
 
 - [ ] **TASK-18** — Implement wizard page 2: OpenRouter API key and model entry. Pre-fill model with default from `DESIGN.md`. Validate both non-empty.
 
