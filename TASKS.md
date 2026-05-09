@@ -68,7 +68,7 @@
 
 - [x] **TASK-17** — Implement wizard page 1: Soniox API key entry. Validate non-empty before proceeding.
 
-- [ ] **TASK-18** — Implement wizard page 2: OpenRouter API key and model entry. Pre-fill model with default from `DESIGN.md`. Validate both non-empty.
+- [x] **TASK-18** — Implement wizard page 2: OpenRouter API key and model entry. Pre-fill model with default from `DESIGN.md`. Validate both non-empty.
 
 - [ ] **TASK-19** — Implement wizard page 3: hotkey setup. On Wayland: XDG GlobalShortcuts portal. On X11: key-capture widget. Default Right Ctrl. Show success/failure before proceeding.
 

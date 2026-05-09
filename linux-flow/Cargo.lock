@@ -1481,6 +1481,7 @@ dependencies = [
  "gtk4",
  "ksni",
  "libadwaita",
+ "libc",
  "linux-flow-shared",
  "pipewire",
  "reqwest",
