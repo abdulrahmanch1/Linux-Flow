@@ -16,7 +16,7 @@ pub(crate) fn page_hotkey(
     }
 }
 
-fn gdk_to_evdev(name: &str) -> Option<&'static str> {
+pub(crate) fn gdk_to_evdev(name: &str) -> Option<&'static str> {
     match name {
         "Control_R" => Some("KEY_RIGHTCTRL"),
         "Control_L" => Some("KEY_LEFTCTRL"),
@@ -31,7 +31,7 @@ fn gdk_to_evdev(name: &str) -> Option<&'static str> {
     }
 }
 
-async fn bind_portal() -> Result<(), String> {
+pub(crate) async fn bind_portal() -> Result<(), String> {
     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
     let shortcuts = GlobalShortcuts::new().await.map_err(|e| e.to_string())?;
     let session = shortcuts.create_session().await.map_err(|e| e.to_string())?;

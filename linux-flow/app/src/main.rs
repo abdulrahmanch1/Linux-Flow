@@ -9,6 +9,7 @@ mod notifications;
 mod pipeline;
 mod secrets;
 mod settings;
+mod settings_hotkey;
 mod tray;
 mod ui;
 mod wizard;
