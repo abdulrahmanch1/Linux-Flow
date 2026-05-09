@@ -11,6 +11,7 @@ mod settings;
 mod tray;
 mod ui;
 mod wizard;
+mod wizard_hotkey;
 
 fn main() {
     // TODO: implement entry point
