@@ -12,6 +12,7 @@ mod tray;
 mod ui;
 mod wizard;
 mod wizard_hotkey;
+mod wizard_polkit;
 
 fn main() {
     // TODO: implement entry point

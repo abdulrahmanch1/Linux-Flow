@@ -72,7 +72,7 @@
 
 - [x] **TASK-19** — Implement wizard page 3: hotkey setup. On Wayland: XDG GlobalShortcuts portal. On X11: key-capture widget. Default Right Ctrl. Show success/failure before proceeding.
 
-- [ ] **TASK-20** — Implement wizard page 4: polkit authorization. Explain why polkit is needed, "Authorize" button triggers polkit dialog.
+- [x] **TASK-20** — Implement wizard page 4: polkit authorization. Explain why polkit is needed, "Authorize" button triggers polkit dialog.
 
 - [ ] **TASK-21** — Implement wizard completion: write keys to libsecret, save `config.toml`, show tray. Auto-show wizard on startup if config or keys are missing.
 

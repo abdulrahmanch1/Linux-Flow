@@ -50,8 +50,8 @@ async fn bind_portal() -> Result<(), String> {
 }
 
 fn page_wayland(
-    _state: Rc<RefCell<WizardState>>,
-    _nav: adw::NavigationView,
+    state: Rc<RefCell<WizardState>>,
+    nav: adw::NavigationView,
 ) -> adw::NavigationPage {
     let status = gtk4::Label::new(Some(
         "Click to register the Right Ctrl push-to-talk hotkey via the system portal.",
@@ -65,7 +65,9 @@ fn page_wayland(
     next.set_sensitive(false);
     next.add_css_class("suggested-action");
 
-    next.connect_clicked(move |_| { /* page_polkit will be pushed here */ });
+    next.connect_clicked(glib::clone!(#[weak] nav, #[strong] state, move |_| {
+        nav.push(&crate::wizard_polkit::page_polkit(Rc::clone(&state), nav.clone()));
+    }));
 
     grant.connect_clicked(glib::clone!(#[weak] status, #[weak] next, #[weak] grant, move |_| {
         grant.set_sensitive(false);
@@ -110,7 +112,7 @@ fn page_wayland(
     build_page(&status, &grant, next, "Hotkey")
 }
 
-fn page_x11(state: Rc<RefCell<WizardState>>, _nav: adw::NavigationView) -> adw::NavigationPage {
+fn page_x11(state: Rc<RefCell<WizardState>>, nav: adw::NavigationView) -> adw::NavigationPage {
     let status = gtk4::Label::new(Some(
         "Click the button and press a modifier key to set your push-to-talk hotkey.",
     ));
@@ -122,7 +124,9 @@ fn page_x11(state: Rc<RefCell<WizardState>>, _nav: adw::NavigationView) -> adw::
     let next = gtk4::Button::with_label("Next");
     next.add_css_class("suggested-action");
 
-    next.connect_clicked(move |_| { /* page_polkit will be pushed here */ });
+    next.connect_clicked(glib::clone!(#[weak] nav, #[strong] state, move |_| {
+        nav.push(&crate::wizard_polkit::page_polkit(Rc::clone(&state), nav.clone()));
+    }));
 
     let key_ctrl = gtk4::EventControllerKey::new();
     let capture_w = capture.downgrade();
