@@ -15,6 +15,14 @@ ROOT=/home/abdulrahmanchibon/Hani-pro/linux-flow
 
 cd "$ROOT"
 
+echo "=== forbidden-attrs ===" >&2
+BAD=$(grep -rn 'allow(dead_code)' --include='*.rs' . | grep -v 'app/src/main\.rs' || true)
+if [[ -n "$BAD" ]]; then
+    echo "FORBIDDEN: allow(dead_code) outside app/src/main.rs:" >&2
+    echo "$BAD" >&2
+    exit 1
+fi
+
 echo "=== build ===" >&2
 $CARGO build --workspace
 

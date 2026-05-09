@@ -74,7 +74,7 @@ pub(crate) fn page_polkit(
                         glib::ControlFlow::Break
                     }
                     Ok(Err(e)) => {
-                        s.set_text(&format!("{e}"));
+                        s.set_text(&e.to_string());
                         a.set_sensitive(true);
                         glib::ControlFlow::Break
                     }

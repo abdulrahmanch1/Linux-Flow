@@ -3,6 +3,7 @@
 mod asr;
 mod audio;
 mod hotkey;
+mod ipc_client;
 mod llm;
 mod notifications;
 mod pipeline;

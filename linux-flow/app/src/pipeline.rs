@@ -2,19 +2,13 @@ use crate::{
     asr::{self, AsrError},
     audio::AudioCapture,
     hotkey::{HotkeyEvent, HotkeyManager},
+    ipc_client,
     llm::{LlmClient, LlmError},
     secrets,
 };
-use linux_flow_shared::{
-    config::Config,
-    ipc_proto::{encode_frame, IpcRequest, RESPONSE_OK},
-};
+use linux_flow_shared::config::Config;
 use thiserror::Error;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
-    sync::mpsc,
-};
+use tokio::sync::mpsc;
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Debug, Clone)]
@@ -129,29 +123,11 @@ impl Pipeline {
             raw.zeroize();
             if fallback { let _ = events.send(PipelineEvent::LlmFallback).await; }
 
-            match inject_text(text.as_str()).await {
+            match ipc_client::inject_text(text.as_str()).await {
                 Ok(()) => { let _ = events.send(PipelineEvent::TextInjected).await; }
                 Err(msg) => { let _ = events.send(PipelineEvent::Error(msg)).await; }
             }
             text.zeroize();
         }
     }
-}
-
-async fn inject_text(text: &str) -> Result<(), String> {
-    // SAFETY: getuid() has no preconditions and always succeeds on Linux.
-    let uid = unsafe { libc::getuid() };
-    let path = format!("/run/user/{uid}/linux-flow-helper.sock");
-    let mut stream = UnixStream::connect(&path).await
-        .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
-    let mut frame = encode_frame(&IpcRequest::InjectText { text: text.to_owned() })
-        .map_err(|e| e.to_string())?;
-    let write_result = stream.write_all(&frame).await;
-    frame.zeroize();
-    write_result.map_err(|_| "Could not inject text into the focused window.".to_string())?;
-    let mut resp = [0u8; 1];
-    stream.read_exact(&mut resp).await
-        .map_err(|_| "Could not inject text into the focused window.".to_string())?;
-    if resp[0] == RESPONSE_OK { Ok(()) }
-    else { Err("Could not inject text into the focused window.".to_string()) }
 }
