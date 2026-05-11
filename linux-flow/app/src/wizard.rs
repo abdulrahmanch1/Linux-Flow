@@ -11,9 +11,13 @@ pub(crate) struct WizardState {
     pub(crate) on_complete: Rc<dyn Fn()>,
 }
 
-/// Returns true if either API key is absent from the keyring.
+/// Returns true if the config file is absent or either API key is missing.
 pub async fn needs_setup() -> bool {
-    !crate::secrets::key_exists("soniox").await
+    let config_absent = linux_flow_shared::config::Config::config_path()
+        .map(|p| !p.exists())
+        .unwrap_or(true);
+    config_absent
+        || !crate::secrets::key_exists("soniox").await
         || !crate::secrets::key_exists("openrouter").await
 }
 
