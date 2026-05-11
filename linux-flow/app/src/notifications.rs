@@ -1,3 +1,6 @@
+// The FDO Notifications interface mandates 9 parameters; suppress the lint.
+#![allow(clippy::too_many_arguments)]
+
 use crate::{
     pipeline::PipelineEvent,
     tray::{TrayHandle, TrayState},

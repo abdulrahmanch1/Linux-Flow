@@ -14,7 +14,7 @@ mod wizard;
 mod wizard_hotkey;
 mod wizard_polkit;
 
-use gtk4::{glib, prelude::*};
+use gtk4::{glib, prelude::GtkWindowExt};
 use linux_flow_shared::config::Config;
 use notifications::Notifier;
 use pipeline::PipelineEvent;
@@ -34,7 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ev_tx, ev_rx) = mpsc::channel::<PipelineEvent>(16);
     let tray = rt.block_on(tray::spawn_tray(quit_tx))?;
 
-    gtk4::init()?;
     libadwaita::init()?;
 
     let notifier = Notifier::new(tray);
