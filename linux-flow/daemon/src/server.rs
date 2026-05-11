@@ -96,8 +96,14 @@ async fn handle_connection(
 
     let response = match ipc_proto::decode_frame(&payload) {
         Ok(IpcRequest::InjectText { mut text }) => {
-            let result = injector.inject_text(&text);
-            text.zeroize();
+            let inj = Arc::clone(&injector);
+            let result = tokio::task::spawn_blocking(move || {
+                let r = inj.inject_text(&text);
+                text.zeroize();
+                r
+            })
+            .await
+            .map_err(|_| DaemonError::InjectionFailed("injection task panicked".to_owned()))?;
             match result {
                 Ok(()) => RESPONSE_OK,
                 Err(_) => RESPONSE_ERR,
