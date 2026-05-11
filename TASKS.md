@@ -98,6 +98,6 @@
 
 ## Phase 12 — Distribution
 
-- [ ] **TASK-25** — Write `install.sh` per `DESIGN.md` Distribution section.
+- [x] **TASK-25** — Write `install.sh` per `DESIGN.md` Distribution section.
 
-- [ ] **TASK-26** — Write `uninstall.sh` per `DESIGN.md` Distribution section.
+- [x] **TASK-26** — Write `uninstall.sh` per `DESIGN.md` Distribution section.
