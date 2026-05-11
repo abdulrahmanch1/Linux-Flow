@@ -67,8 +67,16 @@ impl Tray for AppTray {
         vec![
             StandardItem { label: "linux-flow".into(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
-            StandardItem { label: "Settings\u{2026}".into(), ..Default::default() }.into(),
-            StandardItem { label: "About".into(), ..Default::default() }.into(),
+            StandardItem {
+                label: "Settings\u{2026}".into(),
+                activate: Box::new(|_| crate::ui::open_settings()),
+                ..Default::default()
+            }.into(),
+            StandardItem {
+                label: "About".into(),
+                activate: Box::new(|_| crate::ui::open_about()),
+                ..Default::default()
+            }.into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Quit".into(),

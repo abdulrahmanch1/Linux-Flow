@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-const SCHEMA: &str = "ai.linux-flow";
 const ATTR_SERVICE: &str = "service";
 
 #[derive(Debug, Error)]
