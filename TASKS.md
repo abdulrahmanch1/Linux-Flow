@@ -86,7 +86,7 @@
 
 ## Phase 10 — Notifications
 
-- [ ] **TASK-23** — Wire all `PipelineEvent` variants to tray state changes and desktop notifications (libnotify when no window is open, `AdwToast` when a window is open).
+- [x] **TASK-23** — Wire all `PipelineEvent` variants to tray state changes and desktop notifications (libnotify when no window is open, `AdwToast` when a window is open).
 
 ---
 
