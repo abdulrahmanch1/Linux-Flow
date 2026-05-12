@@ -18,10 +18,6 @@ pub trait KeyInjector: Send + Sync {
     fn inject_text(&self, text: &str) -> Result<(), DaemonError>;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Returns the socket path for the current user.
 pub fn socket_path() -> Result<PathBuf, DaemonError> {
     // SAFETY: getuid() has no preconditions and always succeeds on Linux.
@@ -47,11 +43,7 @@ async fn remove_stale_socket(path: &Path) -> Result<(), DaemonError> {
 /// The ucred struct is stack-allocated, fully owned, and not aliased.
 fn verify_peer(stream: &UnixStream, owner_uid: u32) -> Result<(), DaemonError> {
     let fd = stream.as_raw_fd();
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
 
     let ret = unsafe {
@@ -75,10 +67,6 @@ fn verify_peer(stream: &UnixStream, owner_uid: u32) -> Result<(), DaemonError> {
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Connection handler
-// ---------------------------------------------------------------------------
 
 async fn handle_connection(
     mut stream: UnixStream,
@@ -117,10 +105,6 @@ async fn handle_connection(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Server loop
-// ---------------------------------------------------------------------------
-
 pub async fn run_server(
     mut shutdown: oneshot::Receiver<()>,
     injector: Arc<dyn KeyInjector>,
@@ -139,7 +123,12 @@ pub async fn run_server(
                 let inj = Arc::clone(&injector);
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream, owner_uid, inj).await {
-                        eprintln!("linux-flow-helper: connection error: {e}");
+                        let kind = match &e {
+                            DaemonError::UcredMismatch { .. } => "peer uid mismatch",
+                            DaemonError::InjectionFailed(_) => "injection failed",
+                            _ => "connection error",
+                        };
+                        eprintln!("linux-flow-helper: {kind}");
                     }
                 });
             }
