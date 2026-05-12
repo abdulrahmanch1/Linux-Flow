@@ -12,6 +12,7 @@ mod tray;
 mod ui;
 mod wizard;
 mod wizard_hotkey;
+mod wizard_hotkey_x11;
 mod wizard_polkit;
 
 use gtk4::{glib, prelude::GtkWindowExt};
