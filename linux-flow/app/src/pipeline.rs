@@ -84,10 +84,10 @@ impl Pipeline {
                         "Soniox API key is invalid. Open Settings to update it.".to_owned(),
                     _ => "Speech recognition failed. Please try again.".to_owned(),
                 }));
-            let mut raw = Zeroizing::new(match asr_result {
+            let mut raw = match asr_result {
                 Ok(t) => t,
                 Err(msg) => { let _ = events.send(PipelineEvent::Error(msg)).await; continue; }
-            });
+            };
 
             let or_key = match secrets::resolve_key("OPENROUTER_API_KEY", "openrouter").await {
                 Ok(k) => k,

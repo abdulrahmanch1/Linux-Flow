@@ -55,7 +55,7 @@ pub async fn transcribe(
     mut api_key: Zeroizing<String>,
     language: &str,
     mut audio_rx: mpsc::Receiver<Vec<u8>>,
-) -> Result<String, AsrError> {
+) -> Result<Zeroizing<String>, AsrError> {
     let (ws, _) = timeout(CONNECT_TIMEOUT, connect_async(SONIOX_URL))
         .await
         .map_err(|_| AsrError::ConnectTimeout)?
@@ -65,7 +65,7 @@ pub async fn transcribe(
 
     // Build and send the config frame, then zeroize the api_key immediately.
     let hints: Vec<&str> = if language == "auto" { vec![] } else { vec![language] };
-    let config = json!({
+    let mut config = Zeroizing::new(json!({
         "api_key": *api_key,
         "model": "stt-rt-v4",
         "audio_format": "pcm_s16le",
@@ -74,15 +74,17 @@ pub async fn transcribe(
         "enable_language_identification": true,
         "language_hints": hints,
     })
-    .to_string();
+    .to_string());
     api_key.zeroize();
-    sink.send(Message::Text(config)).await?;
+    let send_config = (*config).clone();
+    config.zeroize();
+    sink.send(Message::Text(send_config)).await?;
 
     // Spawn the reader. It accumulates is_final tokens and resolves on `finished`.
     // Auth / stream errors surface here and are returned after EOS.
     let read_task = tokio::spawn(async move {
         let mut stream = stream;
-        let mut transcript = String::new();
+        let mut transcript = Zeroizing::new(String::new());
         while let Some(msg) = stream.next().await {
             let text = match msg {
                 Ok(Message::Text(t)) => t,
