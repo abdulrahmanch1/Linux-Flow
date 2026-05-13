@@ -8,30 +8,31 @@ pub(crate) struct WizardState {
     pub openrouter_key: Zeroizing<String>,
     pub model: String,
     pub hotkey: String,
-    pub(crate) on_complete: Rc<dyn Fn()>,
 }
 
-/// Returns true if the config file is absent or either API key is missing.
-pub async fn needs_setup() -> bool {
-    let config_absent = linux_flow_shared::config::Config::config_path()
+impl Default for WizardState {
+    fn default() -> Self {
+        let cfg = linux_flow_shared::config::Config::default();
+        Self {
+            soniox_key: Zeroizing::new(String::new()),
+            openrouter_key: Zeroizing::new(String::new()),
+            model: cfg.llm.model,
+            hotkey: cfg.general.hotkey,
+        }
+    }
+}
+
+/// Returns `true` if the first-run wizard must be shown.
+/// The config file is only written on wizard completion, so its absence means setup is needed.
+pub fn needs_setup() -> bool {
+    linux_flow_shared::config::Config::config_path()
         .map(|p| !p.exists())
-        .unwrap_or(true);
-    config_absent
-        || !crate::secrets::key_exists("soniox").await
-        || !crate::secrets::key_exists("openrouter").await
+        .unwrap_or(true)
 }
 
-/// Build the first-run wizard window. `on_complete` is called after the
-/// wizard saves all credentials and config successfully.
-pub fn build_wizard(on_complete: impl Fn() + 'static) -> adw::Window {
-    let cfg = linux_flow_shared::config::Config::default();
-    let state = Rc::new(RefCell::new(WizardState {
-        soniox_key: Zeroizing::new(String::new()),
-        openrouter_key: Zeroizing::new(String::new()),
-        model: cfg.llm.model,
-        hotkey: cfg.general.hotkey,
-        on_complete: Rc::new(on_complete),
-    }));
+/// Build the first-run wizard window. Call `.present()` to show it.
+pub fn build_wizard() -> adw::Window {
+    let state = Rc::new(RefCell::new(WizardState::default()));
     let nav = adw::NavigationView::new();
     nav.push(&page_soniox(Rc::clone(&state), nav.clone()));
 
