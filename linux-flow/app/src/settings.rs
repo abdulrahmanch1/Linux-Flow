@@ -1,85 +1,98 @@
-use gtk4::{glib, prelude::*};
+use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use linux_flow_shared::config::Config;
-use std::{cell::RefCell, rc::Rc};
 use zeroize::Zeroizing;
 
-/// Build the settings window pre-populated with `config`. Every change is
-/// written to disk (config.toml) or the keyring immediately on apply.
-pub fn build_settings(config: Config) -> adw::PreferencesWindow {
-    let config = Rc::new(RefCell::new(config));
+pub fn build_settings() -> adw::PreferencesWindow {
+    let cfg = Config::load().unwrap_or_default();
 
-    let voice_group = adw::PreferencesGroup::new();
-    voice_group.set_title("Voice Input");
-    voice_group.add(&crate::settings_hotkey::hotkey_row(Rc::clone(&config)));
-    voice_group.add(&text_row(
-        "Soniox Language",
-        &config.borrow().soniox.language.clone(),
-        { let c = Rc::clone(&config); move |v| { c.borrow_mut().soniox.language = v; persist(&c); } },
-    ));
+    let hotkey_row = adw::EntryRow::new();
+    hotkey_row.set_title("Push-to-Talk Hotkey");
+    hotkey_row.set_text(&cfg.general.hotkey);
 
-    let model_group = adw::PreferencesGroup::new();
-    model_group.set_title("AI Model");
-    model_group.add(&text_row(
-        "OpenRouter Model",
-        &config.borrow().llm.model.clone(),
-        { let c = Rc::clone(&config); move |v| { c.borrow_mut().llm.model = v; persist(&c); } },
-    ));
+    let lang_row = adw::EntryRow::new();
+    lang_row.set_title("Language");
+    lang_row.set_text(&cfg.soniox.language);
 
-    let keys_group = adw::PreferencesGroup::new();
-    keys_group.set_title("API Keys");
-    keys_group.add(&key_row("Soniox API Key", "soniox"));
-    keys_group.add(&key_row("OpenRouter API Key", "openrouter"));
+    let model_row = adw::EntryRow::new();
+    model_row.set_title("Model");
+    model_row.set_text(&cfg.llm.model);
+
+    let soniox_key_row = adw::PasswordEntryRow::new();
+    soniox_key_row.set_title("Soniox API Key");
+
+    let openrouter_key_row = adw::PasswordEntryRow::new();
+    openrouter_key_row.set_title("OpenRouter API Key");
+
+    hotkey_row.connect_apply(|r| {
+        let v = r.text().to_string();
+        if !v.is_empty() {
+            patch_config(|c| c.general.hotkey = v);
+        }
+    });
+    lang_row.connect_apply(|r| {
+        let v = r.text().to_string();
+        if !v.is_empty() {
+            patch_config(|c| c.soniox.language = v);
+        }
+    });
+    model_row.connect_apply(|r| {
+        let v = r.text().to_string();
+        if !v.is_empty() {
+            patch_config(|c| c.llm.model = v);
+        }
+    });
+    soniox_key_row.connect_apply(|r| {
+        let v = Zeroizing::new(r.text().to_string());
+        if !v.is_empty() {
+            spawn_save_key("soniox", v);
+        }
+    });
+    openrouter_key_row.connect_apply(|r| {
+        let v = Zeroizing::new(r.text().to_string());
+        if !v.is_empty() {
+            spawn_save_key("openrouter", v);
+        }
+    });
+
+    let general = adw::PreferencesGroup::new();
+    general.set_title("General");
+    general.add(&hotkey_row);
+
+    let speech = adw::PreferencesGroup::new();
+    speech.set_title("Speech Recognition");
+    speech.add(&lang_row);
+    speech.add(&soniox_key_row);
+
+    let llm_grp = adw::PreferencesGroup::new();
+    llm_grp.set_title("Language Model");
+    llm_grp.add(&model_row);
+    llm_grp.add(&openrouter_key_row);
 
     let page = adw::PreferencesPage::new();
-    page.add(&voice_group);
-    page.add(&model_group);
-    page.add(&keys_group);
+    page.add(&general);
+    page.add(&speech);
+    page.add(&llm_grp);
 
-    let win = adw::PreferencesWindow::new();
-    win.set_title(Some("linux-flow Settings"));
-    win.set_default_size(480, 520);
-    win.add(&page);
-    win
+    let window = adw::PreferencesWindow::new();
+    window.set_title(Some("linux-flow Settings"));
+    window.set_default_size(480, -1);
+    window.add(&page);
+    window
 }
 
-fn persist(config: &Rc<RefCell<Config>>) {
-    if let Err(e) = config.borrow().save() {
-        tracing::error!("config save: {e}");
-    }
+fn patch_config(update: impl FnOnce(&mut Config)) {
+    let mut cfg = Config::load().unwrap_or_default();
+    update(&mut cfg);
+    let _ = cfg.save();
 }
 
-fn text_row(title: &str, value: &str, on_apply: impl Fn(String) + 'static) -> adw::EntryRow {
-    let row = adw::EntryRow::new();
-    row.set_title(title);
-    row.set_text(value);
-    row.set_show_apply_button(true);
-    row.connect_apply(move |r| {
-        let t = r.text().to_string();
-        if !t.is_empty() { on_apply(t); }
+fn spawn_save_key(service: &'static str, value: Zeroizing<String>) {
+    std::thread::spawn(move || {
+        let _ = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map(|rt| rt.block_on(crate::secrets::store_key(service, &value)));
+        // value is Zeroized on drop
     });
-    row
-}
-
-fn key_row(title: &str, service: &'static str) -> adw::PasswordEntryRow {
-    let row = adw::PasswordEntryRow::new();
-    row.set_title(title);
-    row.set_show_apply_button(true);
-    row.connect_apply(glib::clone!(#[weak] row, move |_| {
-        let value = row.text().to_string();
-        if value.is_empty() { return; }
-        row.set_text("");
-        std::thread::spawn(move || {
-            let key = Zeroizing::new(value);
-            if let Err(e) = tokio::runtime::Builder::new_current_thread()
-                .enable_all().build()
-                .map_err(|e| e.to_string())
-                .and_then(|rt| rt.block_on(crate::secrets::store_key(service, &key))
-                    .map_err(|e| e.to_string()))
-            {
-                tracing::error!("key store ({service}): {e}");
-            }
-        });
-    }));
-    row
 }

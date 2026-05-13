@@ -80,7 +80,7 @@
 
 ## Phase 9 — Settings
 
-- [ ] **TASK-22** — Implement settings window (`AdwPreferencesWindow`, GTK4 + libadwaita). Rows: hotkey, OpenRouter model, Soniox language, Soniox key (change), OpenRouter key (change). Changes apply immediately without restart.
+- [x] **TASK-22** — Implement settings window (`AdwPreferencesWindow`, GTK4 + libadwaita). Rows: hotkey, OpenRouter model, Soniox language, Soniox key (change), OpenRouter key (change). Changes apply immediately without restart.
 
 ---
 
