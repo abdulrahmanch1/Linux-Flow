@@ -27,10 +27,6 @@ pub async fn resolve_key(
     read_from_keyring(service_name).await
 }
 
-pub async fn key_exists(service_name: &str) -> bool {
-    read_from_keyring(service_name).await.is_ok()
-}
-
 pub async fn store_key(service_name: &str, value: &str) -> Result<(), SecretsError> {
     let ss = SecretService::connect(EncryptionType::Dh).await?;
     let collection = ss.get_default_collection().await?;

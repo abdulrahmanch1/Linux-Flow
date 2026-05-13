@@ -105,7 +105,7 @@ fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button
                 glib::ControlFlow::Break
             }
             Ok(Err(e)) => {
-                s.set_text(&format!("{e}"));
+                s.set_text(&e.to_string());
                 a.set_sensitive(true);
                 glib::ControlFlow::Break
             }

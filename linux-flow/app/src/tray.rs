@@ -2,7 +2,7 @@ use ksni::{
     menu::{MenuItem, StandardItem},
     Icon, Tray, TrayMethods,
 };
-use std::time::Duration;
+use std::{sync::mpsc as stdmpsc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -38,6 +38,7 @@ struct AppTray {
     frame: usize,
     wave_frames: Vec<Vec<u8>>,
     quit_tx: mpsc::Sender<()>,
+    settings_tx: stdmpsc::SyncSender<()>,
 }
 
 impl Tray for AppTray {
@@ -64,19 +65,16 @@ impl Tray for AppTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let quit_tx = self.quit_tx.clone();
+        let settings_tx = self.settings_tx.clone();
         vec![
             StandardItem { label: "linux-flow".into(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Settings\u{2026}".into(),
-                activate: Box::new(|_| crate::ui::open_settings()),
+                activate: Box::new(move |_| { let _ = settings_tx.try_send(()); }),
                 ..Default::default()
             }.into(),
-            StandardItem {
-                label: "About".into(),
-                activate: Box::new(|_| crate::ui::open_about()),
-                ..Default::default()
-            }.into(),
+            StandardItem { label: "About".into(), ..Default::default() }.into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Quit".into(),
@@ -109,12 +107,16 @@ fn make_wave_frames() -> Vec<Vec<u8>> {
         .collect()
 }
 
-pub async fn spawn_tray(quit_tx: mpsc::Sender<()>) -> Result<TrayHandle, TrayError> {
+pub async fn spawn_tray(
+    quit_tx: mpsc::Sender<()>,
+    settings_tx: stdmpsc::SyncSender<()>,
+) -> Result<TrayHandle, TrayError> {
     let handle = AppTray {
         state: TrayState::Idle,
         frame: 0,
         wave_frames: make_wave_frames(),
         quit_tx,
+        settings_tx,
     }
     .spawn()
     .await
