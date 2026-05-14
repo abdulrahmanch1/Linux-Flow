@@ -36,7 +36,7 @@ pub(crate) fn spawn_finish(state: Rc<RefCell<WizardState>>, next: gtk4::Button, 
                     crate::secrets::store_key("openrouter", &openrouter_key)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let mut cfg = Config::default();
+                    let mut cfg = Config::load().unwrap_or_default();
                     cfg.llm.model = model;
                     cfg.general.hotkey = hotkey;
                     cfg.save().map_err(|e| e.to_string())

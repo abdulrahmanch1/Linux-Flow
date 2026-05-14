@@ -65,7 +65,7 @@ pub async fn transcribe(
 
     // Build and send the config frame, then zeroize the api_key immediately.
     let hints: Vec<&str> = if language == "auto" { vec![] } else { vec![language] };
-    let mut config = Zeroizing::new(json!({
+    let mut config_str = Zeroizing::new(json!({
         "api_key": *api_key,
         "model": "stt-rt-v4",
         "audio_format": "pcm_s16le",
@@ -76,9 +76,9 @@ pub async fn transcribe(
     })
     .to_string());
     api_key.zeroize();
-    let send_config = (*config).clone();
-    config.zeroize();
-    sink.send(Message::Text(send_config)).await?;
+    let msg_text = (*config_str).clone();
+    config_str.zeroize();
+    sink.send(Message::Text(msg_text)).await?;
 
     // Spawn the reader. It accumulates is_final tokens and resolves on `finished`.
     // Auth / stream errors surface here and are returned after EOS.

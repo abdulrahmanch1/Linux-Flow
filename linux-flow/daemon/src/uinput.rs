@@ -18,7 +18,17 @@ pub struct UinputInjector {
 
 impl UinputInjector {
     pub fn new() -> Result<Self, DaemonError> {
-        let fd = OpenOptions::new().write(true).open("/dev/uinput")?;
+        let fd = {
+            let mut last_err = std::io::Error::from(std::io::ErrorKind::NotFound);
+            let mut found = None;
+            for _ in 0..4 {
+                match OpenOptions::new().write(true).open("/dev/uinput") {
+                    Ok(f) => { found = Some(f); break; }
+                    Err(e) => { last_err = e; thread::sleep(Duration::from_millis(500)); }
+                }
+            }
+            found.ok_or(DaemonError::Io(last_err))?
+        };
         let raw = fd.as_raw_fd();
 
         macro_rules! ioctl1 {

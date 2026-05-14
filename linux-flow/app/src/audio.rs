@@ -92,6 +92,7 @@ fn capture_loop(
         .add_local_listener_with_user_data((pcm_tx, stop, ml))
         .process(|stream, (tx, stop, ml)| {
             if stop.load(Ordering::Relaxed) {
+                let _ = stream.disconnect();
                 ml.quit();
                 return;
             }

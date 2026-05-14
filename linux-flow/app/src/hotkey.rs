@@ -33,8 +33,9 @@ pub struct HotkeyManager {
 }
 
 impl HotkeyManager {
-    pub fn start() -> Result<Self, HotkeyError> {
+    pub fn start(hotkey: &str) -> Result<Self, HotkeyError> {
         let (tx, rx) = mpsc::channel(4);
+        let hotkey = hotkey.to_owned();
 
         match display::detect() {
             DisplayServer::Wayland => {
@@ -46,7 +47,7 @@ impl HotkeyManager {
             }
             DisplayServer::X11 => {
                 std::thread::spawn(move || {
-                    if let Err(e) = x11_backend::X11Backend::run(tx) {
+                    if let Err(e) = x11_backend::X11Backend::run(tx, &hotkey) {
                         tracing::error!("x11 backend exited: {e}");
                     }
                 });

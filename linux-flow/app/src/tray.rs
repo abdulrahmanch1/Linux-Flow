@@ -39,6 +39,7 @@ struct AppTray {
     wave_frames: Vec<Vec<u8>>,
     quit_tx: mpsc::Sender<()>,
     settings_tx: stdmpsc::SyncSender<()>,
+    about_tx: stdmpsc::SyncSender<()>,
 }
 
 impl Tray for AppTray {
@@ -66,6 +67,7 @@ impl Tray for AppTray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let quit_tx = self.quit_tx.clone();
         let settings_tx = self.settings_tx.clone();
+        let about_tx = self.about_tx.clone();
         vec![
             StandardItem { label: "linux-flow".into(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
@@ -74,7 +76,11 @@ impl Tray for AppTray {
                 activate: Box::new(move |_| { let _ = settings_tx.try_send(()); }),
                 ..Default::default()
             }.into(),
-            StandardItem { label: "About".into(), ..Default::default() }.into(),
+            StandardItem {
+                label: "About".into(),
+                activate: Box::new(move |_| { let _ = about_tx.try_send(()); }),
+                ..Default::default()
+            }.into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Quit".into(),
@@ -110,6 +116,7 @@ fn make_wave_frames() -> Vec<Vec<u8>> {
 pub async fn spawn_tray(
     quit_tx: mpsc::Sender<()>,
     settings_tx: stdmpsc::SyncSender<()>,
+    about_tx: stdmpsc::SyncSender<()>,
 ) -> Result<TrayHandle, TrayError> {
     let handle = AppTray {
         state: TrayState::Idle,
@@ -117,6 +124,7 @@ pub async fn spawn_tray(
         wave_frames: make_wave_frames(),
         quit_tx,
         settings_tx,
+        about_tx,
     }
     .spawn()
     .await

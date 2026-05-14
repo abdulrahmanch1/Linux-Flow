@@ -16,7 +16,7 @@ mod wizard_polkit;
 use std::{process::ExitCode, sync::mpsc, time::Duration};
 
 use gtk4::{glib, prelude::*};
-use libadwaita as adw;
+use libadwaita::{self as adw, prelude::AdwDialogExt};
 use linux_flow_shared::config::Config;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -84,12 +84,13 @@ fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppErro
     let (events_tx, events_rx) = tokio::sync::mpsc::channel(16);
     let (quit_tx, mut quit_rx) = tokio::sync::mpsc::channel::<()>(1);
     let (settings_tx, settings_rx) = mpsc::sync_channel::<()>(1);
+    let (about_tx, about_rx) = mpsc::sync_channel::<()>(1);
     let (gtk_quit_tx, gtk_quit_rx) = mpsc::sync_channel::<()>(1);
 
-    let tray = rt.block_on(tray::spawn_tray(quit_tx, settings_tx))?;
+    let tray = rt.block_on(tray::spawn_tray(quit_tx, settings_tx, about_tx))?;
     let hotkey = {
         let _g = rt.enter();
-        hotkey::HotkeyManager::start()
+        hotkey::HotkeyManager::start(&config.general.hotkey)
     }?;
     let mut pipeline = rt.block_on(pipeline::Pipeline::new(config))?;
 
@@ -108,6 +109,15 @@ fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppErro
         }
         if settings_rx.try_recv().is_ok() {
             settings::build_settings().present();
+        }
+        if about_rx.try_recv().is_ok() {
+            adw::AboutDialog::builder()
+                .application_name("linux-flow")
+                .version(env!("CARGO_PKG_VERSION"))
+                .license_type(gtk4::License::Gpl30)
+                .website("https://github.com/Abdulrahmanch1/linux-flow")
+                .build()
+                .present(None::<&gtk4::Widget>);
         }
         glib::ControlFlow::Continue
     });

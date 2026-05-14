@@ -2,7 +2,6 @@ use std::os::raw::{c_int, c_ulong};
 use std::ptr;
 
 use tokio::sync::mpsc;
-use x11::keysym::XK_Control_R;
 use x11::xlib::{
     AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask,
     XCloseDisplay, XDefaultRootWindow, XEvent, XGrabKey, XKeysymToKeycode, XNextEvent,
@@ -11,11 +10,25 @@ use x11::xlib::{
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
 
+fn evdev_to_keysym(key: &str) -> c_ulong {
+    use x11::keysym::*;
+    match key {
+        "KEY_RIGHTCTRL"  => XK_Control_R as c_ulong,
+        "KEY_LEFTCTRL"   => XK_Control_L as c_ulong,
+        "KEY_RIGHTALT"   => XK_Alt_R as c_ulong,
+        "KEY_LEFTALT"    => XK_Alt_L as c_ulong,
+        "KEY_RIGHTMETA"  => XK_Super_R as c_ulong,
+        "KEY_LEFTMETA"   => XK_Super_L as c_ulong,
+        "KEY_CAPSLOCK"   => XK_Caps_Lock as c_ulong,
+        _                => XK_Control_R as c_ulong,
+    }
+}
+
 pub struct X11Backend;
 
 impl X11Backend {
     /// Blocks the calling thread. Must be spawned via `std::thread::spawn`.
-    pub fn run(tx: mpsc::Sender<HotkeyEvent>) -> Result<(), HotkeyError> {
+    pub fn run(tx: mpsc::Sender<HotkeyEvent>, hotkey: &str) -> Result<(), HotkeyError> {
         // SAFETY: All X11 calls follow documented usage patterns;
         // return values are checked before dereferencing.
         let display = unsafe { XOpenDisplay(ptr::null()) };
@@ -24,7 +37,8 @@ impl X11Backend {
         }
 
         let root = unsafe { XDefaultRootWindow(display) };
-        let keycode = unsafe { XKeysymToKeycode(display, XK_Control_R as c_ulong) };
+        let keysym = evdev_to_keysym(hotkey);
+        let keycode = unsafe { XKeysymToKeycode(display, keysym) };
 
         if keycode == 0 {
             unsafe { XCloseDisplay(display) };
