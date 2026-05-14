@@ -26,6 +26,8 @@ pub enum HotkeyError {
     X11Keycode,
     #[error("no display server detected (WAYLAND_DISPLAY and DISPLAY unset)")]
     NoDisplay,
+    #[error("portal setup timed out")]
+    SetupTimeout,
 }
 
 pub struct HotkeyManager {
@@ -40,18 +42,15 @@ impl HotkeyManager {
         match display::detect() {
             DisplayServer::Wayland => {
                 tokio::spawn(async move {
-                    let portal = tokio::time::timeout(
-                        std::time::Duration::from_secs(3),
-                        wayland_backend::WaylandBackend::run(tx.clone()),
-                    )
-                    .await;
-                    let failed = matches!(portal, Ok(Err(_)) | Err(_));
-                    if failed && std::env::var_os("DISPLAY").is_some() {
-                        std::thread::spawn(move || {
-                            if let Err(e) = x11_backend::X11Backend::run(tx, &hotkey) {
-                                tracing::error!("x11 fallback exited: {e}");
-                            }
-                        });
+                    if let Err(e) = wayland_backend::WaylandBackend::run(tx.clone()).await {
+                        tracing::warn!("wayland portal unavailable ({e}), trying X11 fallback");
+                        if std::env::var_os("DISPLAY").is_some() {
+                            std::thread::spawn(move || {
+                                if let Err(e) = x11_backend::X11Backend::run(tx, &hotkey) {
+                                    tracing::error!("x11 fallback exited: {e}");
+                                }
+                            });
+                        }
                     }
                 });
             }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -5,13 +7,19 @@ use tokio::sync::mpsc;
 use crate::hotkey::{HotkeyError, HotkeyEvent};
 
 const SHORTCUT_ID: &str = "record";
+const SETUP_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct WaylandBackend;
 
 impl WaylandBackend {
     pub async fn run(tx: mpsc::Sender<HotkeyEvent>) -> Result<(), HotkeyError> {
-        let shortcuts = GlobalShortcuts::new().await?;
-        let session = shortcuts.create_session().await?;
+        let shortcuts = tokio::time::timeout(SETUP_TIMEOUT, GlobalShortcuts::new())
+            .await
+            .map_err(|_| HotkeyError::SetupTimeout)??;
+
+        let session = tokio::time::timeout(SETUP_TIMEOUT, shortcuts.create_session())
+            .await
+            .map_err(|_| HotkeyError::SetupTimeout)??;
 
         shortcuts
             .bind_shortcuts(

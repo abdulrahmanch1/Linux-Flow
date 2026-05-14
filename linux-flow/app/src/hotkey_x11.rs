@@ -20,6 +20,8 @@ fn evdev_to_keysym(key: &str) -> c_ulong {
         "KEY_RIGHTMETA"  => XK_Super_R as c_ulong,
         "KEY_LEFTMETA"   => XK_Super_L as c_ulong,
         "KEY_CAPSLOCK"   => XK_Caps_Lock as c_ulong,
+        "KEY_RIGHTSHIFT" => XK_Shift_R as c_ulong,
+        "KEY_LEFTSHIFT"  => XK_Shift_L as c_ulong,
         _                => XK_Control_R as c_ulong,
     }
 }
