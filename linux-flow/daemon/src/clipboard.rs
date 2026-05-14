@@ -13,8 +13,8 @@ pub fn detect_display() -> DisplayServer {
 /// Writes `text` to the system clipboard using the appropriate tool.
 pub fn clipboard_write(display: DisplayServer, text: &str) -> Result<(), DaemonError> {
     match display {
-        DisplayServer::Wayland => pipe("wl-copy", &[], text),
-        DisplayServer::X11 => pipe("xclip", &["-selection", "clipboard"], text),
+        DisplayServer::Wayland => pipe("/usr/bin/wl-copy", &[], text),
+        DisplayServer::X11 => pipe("/usr/bin/xclip", &["-selection", "clipboard"], text),
         DisplayServer::Unknown => Err(DaemonError::InjectionFailed("no display server".into())),
     }
 }
@@ -23,10 +23,10 @@ pub fn clipboard_write(display: DisplayServer, text: &str) -> Result<(), DaemonE
 pub fn clipboard_clear(display: DisplayServer) {
     match display {
         DisplayServer::Wayland => {
-            let _ = Command::new("wl-copy").arg("--clear").status();
+            let _ = Command::new("/usr/bin/wl-copy").arg("--clear").status();
         }
         DisplayServer::X11 => {
-            let _ = Command::new("xclip")
+            let _ = Command::new("/usr/bin/xclip")
                 .args(["-selection", "clipboard"])
                 .stdin(Stdio::null())
                 .status();

@@ -2,13 +2,19 @@ use crate::{
     asr::{self, AsrError},
     audio::AudioCapture,
     hotkey::{HotkeyEvent, HotkeyManager},
-    ipc_client,
     llm::{LlmClient, LlmError},
     secrets,
 };
-use linux_flow_shared::config::Config;
+use linux_flow_shared::{
+    config::Config,
+    ipc_proto::{encode_frame, IpcRequest, RESPONSE_OK},
+};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::UnixStream,
+    sync::mpsc,
+};
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Debug, Clone)]
@@ -24,20 +30,28 @@ pub enum PipelineEvent {
 pub enum PipelineError {
     #[error("LLM client init: {0}")]
     LlmInit(String),
+    #[error("API key load: {0}")]
+    KeyLoad(String),
 }
 
 pub struct Pipeline {
     config: Config,
     llm: LlmClient,
+    soniox_key: Zeroizing<String>,
+    or_key: Zeroizing<String>,
 }
 
 impl Pipeline {
-    pub fn new(config: Config) -> Result<Self, PipelineError> {
+    pub async fn new(config: Config) -> Result<Self, PipelineError> {
         let llm = LlmClient::new().map_err(|e| PipelineError::LlmInit(e.to_string()))?;
-        Ok(Self { config, llm })
+        let soniox_key = secrets::resolve_key("SONIOX_API_KEY", "soniox").await
+            .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
+        let or_key = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter").await
+            .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
+        Ok(Self { config, llm, soniox_key, or_key })
     }
 
-    pub async fn run(&self, mut hotkey: HotkeyManager, events: mpsc::Sender<PipelineEvent>) {
+    pub async fn run(&mut self, mut hotkey: HotkeyManager, events: mpsc::Sender<PipelineEvent>) {
         loop {
             if !matches!(hotkey.next().await, Some(HotkeyEvent::Pressed)) { break; }
 
@@ -51,17 +65,7 @@ impl Pipeline {
             };
             let _ = events.send(PipelineEvent::RecordingStarted).await;
 
-            let soniox_key = match secrets::resolve_key("SONIOX_API_KEY", "soniox").await {
-                Ok(k) => k,
-                Err(_) => {
-                    tokio::task::spawn_blocking(move || audio.stop()).await.ok();
-                    let _ = events.send(PipelineEvent::Error(
-                        "API key not configured. Open Settings to add it.".into(),
-                    )).await;
-                    continue;
-                }
-            };
-
+            let soniox_key = self.soniox_key.clone();
             let language = self.config.soniox.language.clone();
             let asr = tokio::spawn(async move { asr::transcribe(soniox_key, &language, pcm_rx).await });
 
@@ -75,7 +79,12 @@ impl Pipeline {
             tokio::task::spawn_blocking(move || audio.stop()).await.ok();
             let _ = events.send(PipelineEvent::ProcessingStarted).await;
 
-            let asr_result = asr.await
+            let asr_joined = asr.await;
+            if let Ok(Err(AsrError::Unauthorized)) = &asr_joined {
+                let _ = secrets::resolve_key("SONIOX_API_KEY", "soniox").await
+                    .map(|k| self.soniox_key = k);
+            }
+            let asr_result = asr_joined
                 .map_err(|_| "Speech recognition failed. Please try again.".to_owned())
                 .and_then(|r| r.map_err(|e| match e {
                     AsrError::ConnectTimeout | AsrError::StreamTimeout =>
@@ -84,29 +93,20 @@ impl Pipeline {
                         "Soniox API key is invalid. Open Settings to update it.".to_owned(),
                     _ => "Speech recognition failed. Please try again.".to_owned(),
                 }));
-            let mut raw = match asr_result {
+            let mut raw = Zeroizing::new(match asr_result {
                 Ok(t) => t,
                 Err(msg) => { let _ = events.send(PipelineEvent::Error(msg)).await; continue; }
-            };
-
-            let or_key = match secrets::resolve_key("OPENROUTER_API_KEY", "openrouter").await {
-                Ok(k) => k,
-                Err(_) => {
-                    raw.zeroize();
-                    let _ = events.send(PipelineEvent::Error(
-                        "API key not configured. Open Settings to add it.".into(),
-                    )).await;
-                    continue;
-                }
-            };
+            });
 
             let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
-            let llm_res = self.llm.rewrite(or_key, &model, &raw).await;
+            let llm_res = self.llm.rewrite(self.or_key.clone(), &model, &raw).await;
             let (mut text, fallback) = match llm_res {
                 Ok(t) => (Zeroizing::new(t), false),
                 Err(LlmError::EmptyResponse) => (Zeroizing::new((*raw).clone()), true),
                 Err(LlmError::Unauthorized) => {
                     raw.zeroize();
+                    let _ = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter").await
+                        .map(|k| self.or_key = k);
                     let _ = events.send(PipelineEvent::Error(
                         "OpenRouter API key is invalid. Open Settings to update it.".into(),
                     )).await;
@@ -123,11 +123,29 @@ impl Pipeline {
             raw.zeroize();
             if fallback { let _ = events.send(PipelineEvent::LlmFallback).await; }
 
-            match ipc_client::inject_text(text.as_str()).await {
+            match inject_text(text.as_str()).await {
                 Ok(()) => { let _ = events.send(PipelineEvent::TextInjected).await; }
                 Err(msg) => { let _ = events.send(PipelineEvent::Error(msg)).await; }
             }
             text.zeroize();
         }
     }
+}
+
+async fn inject_text(text: &str) -> Result<(), String> {
+    // SAFETY: getuid() has no preconditions and always succeeds on Linux.
+    let uid = unsafe { libc::getuid() };
+    let path = format!("/run/user/{uid}/linux-flow-helper.sock");
+    let mut stream = UnixStream::connect(&path).await
+        .map_err(|_| "Input helper is not running. Try restarting linux-flow.".to_string())?;
+    let mut frame = encode_frame(&IpcRequest::InjectText { text: text.to_owned() })
+        .map_err(|e| e.to_string())?;
+    let write_result = stream.write_all(&frame).await;
+    frame.zeroize();
+    write_result.map_err(|_| "Could not inject text into the focused window.".to_string())?;
+    let mut resp = [0u8; 1];
+    stream.read_exact(&mut resp).await
+        .map_err(|_| "Could not inject text into the focused window.".to_string())?;
+    if resp[0] == RESPONSE_OK { Ok(()) }
+    else { Err("Could not inject text into the focused window.".to_string()) }
 }

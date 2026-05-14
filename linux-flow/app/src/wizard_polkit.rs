@@ -62,17 +62,42 @@ pub(crate) fn page_polkit(
     adw::NavigationPage::new(&toolbar, "Authorize Helper")
 }
 
+fn read_proc_start_time() -> Result<String, String> {
+    let stat = std::fs::read_to_string("/proc/self/stat").map_err(|e| e.to_string())?;
+    // Field 2 (comm) is wrapped in '()' and may contain spaces; split on the last ')'.
+    let rest = stat
+        .rsplit(')')
+        .next()
+        .ok_or("malformed /proc/self/stat")?;
+    // starttime is field 22 (1-indexed) = index 19 after the closing ')'.
+    rest.split_whitespace()
+        .nth(19)
+        .map(str::to_owned)
+        .ok_or_else(|| "malformed /proc/self/stat".to_string())
+}
+
 fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button) {
     auth_btn.set_sensitive(false);
     status.set_text("Requesting authorization…");
 
-    let pid = std::process::id().to_string();
+    let pid = std::process::id();
+    // SAFETY: getuid() always succeeds on Linux.
+    let uid = unsafe { libc::getuid() };
+    let start_time = match read_proc_start_time() {
+        Ok(t) => t,
+        Err(e) => {
+            status.set_text(&format!("could not read process info: {e}"));
+            auth_btn.set_sensitive(true);
+            return;
+        }
+    };
+    let process_arg = format!("{pid},{start_time},{uid}");
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::spawn(move || {
         let result = std::process::Command::new("pkcheck")
             .args([
                 "--action-id", POLKIT_ACTION,
-                "--process", &pid,
+                "--process", &process_arg,
                 "--detail", "program", HELPER_PATH,
                 "--allow-user-interaction",
             ])

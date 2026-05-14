@@ -91,7 +91,7 @@ fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppErro
         let _g = rt.enter();
         hotkey::HotkeyManager::start()
     }?;
-    let pipeline = pipeline::Pipeline::new(config)?;
+    let mut pipeline = rt.block_on(pipeline::Pipeline::new(config))?;
 
     rt.spawn(notifications::handle_events(events_rx, tray, None));
     rt.spawn(async move { pipeline.run(hotkey, events_tx).await });
