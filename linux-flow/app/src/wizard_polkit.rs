@@ -5,7 +5,6 @@ use libadwaita as adw;
 
 use crate::wizard::WizardState;
 
-const HELPER_PATH: &str = "/usr/local/lib/linux-flow/linux-flow-helper";
 const POLKIT_ACTION: &str = "org.freedesktop.policykit.exec";
 
 pub(crate) fn page_polkit(
@@ -98,7 +97,6 @@ fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button
             .args([
                 "--action-id", POLKIT_ACTION,
                 "--process", &process_arg,
-                "--detail", "program", HELPER_PATH,
                 "--allow-user-interaction",
             ])
             .status()

@@ -1,6 +1,5 @@
 polkit.addRule(function(action, subject) {
     if (action.id === "org.freedesktop.policykit.exec" &&
-        action.lookup("program") === "/usr/local/lib/linux-flow/linux-flow-helper" &&
         subject.isInGroup("uinput")) {
         return polkit.Result.YES;
     }
