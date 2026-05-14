@@ -40,17 +40,18 @@ impl HotkeyManager {
         match display::detect() {
             DisplayServer::Wayland => {
                 tokio::spawn(async move {
-                    match wayland_backend::WaylandBackend::run(tx.clone()).await {
-                        Ok(()) => {}
-                        Err(_) if std::env::var_os("DISPLAY").is_some() => {
-                            // Portal unavailable — fall back to X11 via XWayland.
-                            std::thread::spawn(move || {
-                                if let Err(e) = x11_backend::X11Backend::run(tx, &hotkey) {
-                                    tracing::error!("x11 fallback exited: {e}");
-                                }
-                            });
-                        }
-                        Err(e) => tracing::error!("wayland backend exited: {e}"),
+                    let portal = tokio::time::timeout(
+                        std::time::Duration::from_secs(3),
+                        wayland_backend::WaylandBackend::run(tx.clone()),
+                    )
+                    .await;
+                    let failed = matches!(portal, Ok(Err(_)) | Err(_));
+                    if failed && std::env::var_os("DISPLAY").is_some() {
+                        std::thread::spawn(move || {
+                            if let Err(e) = x11_backend::X11Backend::run(tx, &hotkey) {
+                                tracing::error!("x11 fallback exited: {e}");
+                            }
+                        });
                     }
                 });
             }
