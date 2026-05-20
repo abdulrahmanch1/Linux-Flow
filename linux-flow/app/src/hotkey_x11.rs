@@ -1,29 +1,32 @@
-use std::os::raw::{c_int, c_ulong};
+use std::os::raw::c_int;
 use std::ptr;
 
 use tokio::sync::mpsc;
 use x11::xlib::{
     AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask,
-    XCloseDisplay, XDefaultRootWindow, XEvent, XGrabKey, XKeysymToKeycode, XNextEvent,
+    XCloseDisplay, XDefaultRootWindow, XEvent, XGrabKey, XNextEvent,
     XOpenDisplay, XSelectInput, XUngrabKey,
 };
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
 
-fn evdev_to_keysym(key: &str) -> Option<c_ulong> {
-    use x11::keysym::*;
-    match key {
-        "KEY_RIGHTCTRL"  => Some(XK_Control_R as c_ulong),
-        "KEY_LEFTCTRL"   => Some(XK_Control_L as c_ulong),
-        "KEY_RIGHTALT"   => Some(XK_Alt_R as c_ulong),
-        "KEY_LEFTALT"    => Some(XK_Alt_L as c_ulong),
-        "KEY_RIGHTMETA"  => Some(XK_Super_R as c_ulong),
-        "KEY_LEFTMETA"   => Some(XK_Super_L as c_ulong),
-        "KEY_CAPSLOCK"   => Some(XK_Caps_Lock as c_ulong),
-        "KEY_RIGHTSHIFT" => Some(XK_Shift_R as c_ulong),
-        "KEY_LEFTSHIFT"  => Some(XK_Shift_L as c_ulong),
-        _                => None,
-    }
+fn evdev_name_to_x11_keycode(name: &str) -> Option<u8> {
+    // X11 keycode = Linux evdev keycode + 8 (stable kernel ABI, works even
+    // when the compositor omits a keysym entry for the key, e.g. Control_R
+    // on COSMIC's XWayland).
+    let evdev: u8 = match name {
+        "KEY_RIGHTCTRL"  => 97,
+        "KEY_LEFTCTRL"   => 29,
+        "KEY_RIGHTALT"   => 108,
+        "KEY_LEFTALT"    => 56,
+        "KEY_RIGHTMETA"  => 126,
+        "KEY_LEFTMETA"   => 125,
+        "KEY_CAPSLOCK"   => 58,
+        "KEY_RIGHTSHIFT" => 54,
+        "KEY_LEFTSHIFT"  => 42,
+        _ => return None,
+    };
+    Some(evdev + 8)
 }
 
 pub struct X11Backend;
@@ -39,13 +42,7 @@ impl X11Backend {
         }
 
         let root = unsafe { XDefaultRootWindow(display) };
-        let keysym = evdev_to_keysym(hotkey).ok_or(HotkeyError::X11Keycode)?;
-        let keycode = unsafe { XKeysymToKeycode(display, keysym) };
-
-        if keycode == 0 {
-            unsafe { XCloseDisplay(display) };
-            return Err(HotkeyError::X11Keycode);
-        }
+        let keycode = evdev_name_to_x11_keycode(hotkey).ok_or(HotkeyError::X11Keycode)?;
 
         unsafe {
             XSelectInput(display, root, KeyPressMask | KeyReleaseMask);
