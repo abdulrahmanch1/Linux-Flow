@@ -76,8 +76,7 @@ pub async fn transcribe(
     })
     .to_string());
     api_key.zeroize();
-    let msg_text = (*config_str).clone();
-    config_str.zeroize();
+    let msg_text = std::mem::take(&mut *config_str);
     sink.send(Message::Text(msg_text)).await?;
 
     // Spawn the reader. It accumulates is_final tokens and resolves on `finished`.

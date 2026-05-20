@@ -102,10 +102,7 @@ fn make_wave_frames() -> Vec<Vec<u8>> {
                 let height = ((phase.sin() * 0.35 + 0.55) * ICON_SIZE as f64) as usize;
                 for y in (ICON_SIZE - height.min(ICON_SIZE))..ICON_SIZE {
                     let i = (y * ICON_SIZE + x) * 4;
-                    data[i] = 0xFF;
-                    data[i + 1] = 0x4C;
-                    data[i + 2] = 0xAF;
-                    data[i + 3] = 0x50;
+                    data[i..i + 4].copy_from_slice(&[0xFF, 0x4C, 0xAF, 0x50]);
                 }
             }
             data

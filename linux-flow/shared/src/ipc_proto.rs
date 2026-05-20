@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 pub const RESPONSE_OK: u8 = 0x00;
 pub const RESPONSE_ERR: u8 = 0x01;
@@ -33,15 +34,17 @@ pub enum FrameError {
 ///
 /// Wire format: [4-byte big-endian length][UTF-8 JSON payload]
 pub fn encode_frame(req: &IpcRequest) -> Result<Vec<u8>, FrameError> {
-    let json = serde_json::to_string(req)?;
+    let mut json = serde_json::to_string(req)?;
     let payload = json.as_bytes();
     let len = payload.len();
     if len > MAX_PAYLOAD_BYTES {
+        json.zeroize();
         return Err(FrameError::PayloadTooLarge(len));
     }
     let mut buf = Vec::with_capacity(4 + len);
     buf.extend_from_slice(&(len as u32).to_be_bytes());
     buf.extend_from_slice(payload);
+    json.zeroize();
     Ok(buf)
 }
 

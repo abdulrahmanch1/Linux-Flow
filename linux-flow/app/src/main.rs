@@ -1,6 +1,7 @@
 mod asr;
 mod audio;
 mod hotkey;
+mod inject;
 mod llm;
 mod notifications;
 mod pipeline;
@@ -11,6 +12,8 @@ mod ui;
 mod wizard;
 mod wizard_complete;
 mod wizard_hotkey;
+mod wizard_hotkey_wayland;
+mod wizard_hotkey_x11;
 mod wizard_polkit;
 
 use std::{process::ExitCode, sync::mpsc, time::Duration};

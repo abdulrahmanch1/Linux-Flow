@@ -18,10 +18,6 @@ pub trait KeyInjector: Send + Sync {
     fn inject_text(&self, text: &str) -> Result<(), DaemonError>;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Returns the socket path for the current user.
 pub fn socket_path() -> Result<PathBuf, DaemonError> {
     // SAFETY: getuid() has no preconditions and always succeeds on Linux.
@@ -76,10 +72,6 @@ fn verify_peer(stream: &UnixStream, owner_uid: u32) -> Result<(), DaemonError> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Connection handler
-// ---------------------------------------------------------------------------
-
 async fn handle_connection(
     mut stream: UnixStream,
     owner_uid: u32,
@@ -116,10 +108,6 @@ async fn handle_connection(
     stream.write_all(&[response]).await?;
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Server loop
-// ---------------------------------------------------------------------------
 
 pub async fn run_server(
     mut shutdown: oneshot::Receiver<()>,
