@@ -37,7 +37,8 @@ Do not invent features outside `DESIGN.md`.
 The PostToolUse hook runs `cargo fmt` and `cargo clippy -D warnings` automatically on every `.rs` save via the Edit tool. When creating a new `.rs` file with the Write tool, the hook does **not** fire — run `cargo build` manually to verify. When the build is clean:
 1. Verify the task is fully complete — every requirement in `TASKS.md` for that task is implemented, nothing skipped or stubbed without intent.
 2. Mark the completed task(s) in `TASKS.md` by changing `[ ]` to `[x]`.
-3. Commit with a descriptive message. Push only if a remote is configured (`git remote -v` returns output). Do not wait for the user to ask.
+3. Commit with a descriptive message.
+4. Always push to GitHub immediately after committing (`git push`). Do not wait for the user to ask.
 
 ## Coding Rules
 
