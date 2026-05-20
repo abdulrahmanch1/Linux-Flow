@@ -64,17 +64,29 @@ install_files() {
 # ── system setup ──────────────────────────────────────────────────────────────
 
 setup_uinput() {
+    local groups_changed=0
     sudo groupadd -f uinput
     if ! id -nG "$USER" | grep -qw uinput; then
         sudo usermod -aG uinput "$USER"
-        info "Added $USER to uinput group — a relogin is required."
+        groups_changed=1
     fi
     if ! id -nG "$USER" | grep -qw input; then
         sudo usermod -aG input "$USER"
-        info "Added $USER to input group — a relogin is required."
+        groups_changed=1
     fi
     sudo udevadm control --reload-rules
     sudo udevadm trigger
+    if [[ $groups_changed -eq 1 ]]; then
+        printf '\n=> Group membership updated. A restart is required for changes to take effect.\n'
+        printf '   Restart now? [y/n]: '
+        read -r answer
+        if [[ "${answer,,}" == "y" ]]; then
+            info "Restarting..."
+            sudo systemctl reboot
+        else
+            info "Please restart manually before using linux-flow."
+        fi
+    fi
 }
 
 enable_service() {
