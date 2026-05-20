@@ -23,11 +23,20 @@ impl Default for WizardState {
 }
 
 /// Returns `true` if the first-run wizard must be shown.
-/// The config file is only written on wizard completion, so its absence means setup is needed.
-pub fn needs_setup() -> bool {
-    linux_flow_shared::config::Config::config_path()
+/// Checks config file presence first, then probes libsecret for both keys.
+pub async fn needs_setup() -> bool {
+    if linux_flow_shared::config::Config::config_path()
         .map(|p| !p.exists())
         .unwrap_or(true)
+    {
+        return true;
+    }
+    crate::secrets::resolve_key("SONIOX_API_KEY", "soniox")
+        .await
+        .is_err()
+        || crate::secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
+            .await
+            .is_err()
 }
 
 /// Build the first-run wizard window. Call `.present()` to show it.

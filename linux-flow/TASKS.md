@@ -130,7 +130,7 @@
   - **Files:** `app/src/hotkey_wayland.rs`, `app/src/hotkey.rs`
   - **Verified:** `preferred_trigger` is advisory — the compositor uses it as the default binding suggestion. Passing the user's configured key ensures the portal dialog opens with the correct binding. ✓
 
-- [ ] **TASK-33** — Fix first-run wizard not re-appearing when API keys are deleted from the keyring.
+- [x] **TASK-33** — Fix first-run wizard not re-appearing when API keys are deleted from the keyring.
   - **Root cause:** `wizard.rs:27-31` — `needs_setup()` only checks whether the config file exists on disk. It does not probe libsecret. If a user deletes keys from the keyring while the config file remains, `needs_setup()` returns `false`, the wizard is skipped, and `Pipeline::new()` fails with `PipelineError::KeyLoad` causing a silent exit.
   - **Fix:** Make `needs_setup()` `async`. After the config-file check, call `secrets::resolve_key()` for both `"soniox"` and `"openrouter"`; return `true` if either fails. In `main.rs:48`, change the call to `rt.block_on(wizard::needs_setup())`.
   - **Files:** `app/src/wizard.rs`, `app/src/main.rs`

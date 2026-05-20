@@ -45,7 +45,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if wizard::needs_setup() {
+    if rt.block_on(wizard::needs_setup()) {
         run_wizard();
     }
     let main_loop = glib::MainLoop::new(None, false);
