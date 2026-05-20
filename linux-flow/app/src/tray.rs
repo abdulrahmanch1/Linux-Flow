@@ -23,9 +23,8 @@ pub enum TrayError {
     Service(String),
 }
 
-pub struct TrayHandle {
-    inner: ksni::Handle<AppTray>,
-}
+#[derive(Clone)]
+pub struct TrayHandle { inner: ksni::Handle<AppTray> }
 
 impl TrayHandle {
     pub async fn set_state(&self, state: TrayState) {
@@ -49,9 +48,9 @@ impl Tray for AppTray {
     fn icon_name(&self) -> String {
         match self.state {
             TrayState::Idle => "audio-input-microphone".into(),
+            TrayState::Recording => "media-record".into(),
             TrayState::Processing => "emblem-synchronizing".into(),
             TrayState::Error => "dialog-warning".into(),
-            TrayState::Recording => String::new(),
         }
     }
 

@@ -1,4 +1,5 @@
 use std::sync::mpsc as stdmpsc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -33,6 +34,12 @@ pub async fn handle_events(
                     }
                     None => notify_desktop(msg).await,
                 }
+                // Reset to Idle after 3 s so the tray doesn't stay red indefinitely.
+                let tray_reset = tray.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    tray_reset.set_state(TrayState::Idle).await;
+                });
             }
         }
     }
