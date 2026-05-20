@@ -10,19 +10,19 @@ use x11::xlib::{
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
 
-fn evdev_to_keysym(key: &str) -> c_ulong {
+fn evdev_to_keysym(key: &str) -> Option<c_ulong> {
     use x11::keysym::*;
     match key {
-        "KEY_RIGHTCTRL"  => XK_Control_R as c_ulong,
-        "KEY_LEFTCTRL"   => XK_Control_L as c_ulong,
-        "KEY_RIGHTALT"   => XK_Alt_R as c_ulong,
-        "KEY_LEFTALT"    => XK_Alt_L as c_ulong,
-        "KEY_RIGHTMETA"  => XK_Super_R as c_ulong,
-        "KEY_LEFTMETA"   => XK_Super_L as c_ulong,
-        "KEY_CAPSLOCK"   => XK_Caps_Lock as c_ulong,
-        "KEY_RIGHTSHIFT" => XK_Shift_R as c_ulong,
-        "KEY_LEFTSHIFT"  => XK_Shift_L as c_ulong,
-        _                => XK_Control_R as c_ulong,
+        "KEY_RIGHTCTRL"  => Some(XK_Control_R as c_ulong),
+        "KEY_LEFTCTRL"   => Some(XK_Control_L as c_ulong),
+        "KEY_RIGHTALT"   => Some(XK_Alt_R as c_ulong),
+        "KEY_LEFTALT"    => Some(XK_Alt_L as c_ulong),
+        "KEY_RIGHTMETA"  => Some(XK_Super_R as c_ulong),
+        "KEY_LEFTMETA"   => Some(XK_Super_L as c_ulong),
+        "KEY_CAPSLOCK"   => Some(XK_Caps_Lock as c_ulong),
+        "KEY_RIGHTSHIFT" => Some(XK_Shift_R as c_ulong),
+        "KEY_LEFTSHIFT"  => Some(XK_Shift_L as c_ulong),
+        _                => None,
     }
 }
 
@@ -39,7 +39,7 @@ impl X11Backend {
         }
 
         let root = unsafe { XDefaultRootWindow(display) };
-        let keysym = evdev_to_keysym(hotkey);
+        let keysym = evdev_to_keysym(hotkey).ok_or(HotkeyError::X11Keycode)?;
         let keycode = unsafe { XKeysymToKeycode(display, keysym) };
 
         if keycode == 0 {

@@ -22,7 +22,7 @@ pub enum HotkeyError {
     StreamClosed,
     #[error("failed to open X11 display")]
     X11Connect,
-    #[error("Right Control key not found in X11 keymap")]
+    #[error("configured hotkey is not supported on X11")]
     X11Keycode,
     #[error("no display server detected (WAYLAND_DISPLAY and DISPLAY unset)")]
     NoDisplay,

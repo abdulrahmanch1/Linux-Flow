@@ -148,7 +148,7 @@
   - **Files:** `app/src/audio.rs`, `app/src/pipeline.rs`
   - **Verified:** `std::sync::mpsc` is used (not tokio) because the capture thread is non-async. `try_recv()` after `stop()` is safe — the thread has joined and the sender has either sent or been dropped. Checking before ASR output prevents a confusing duplicate error if ASR also fails on the closed channel. ✓
 
-- [ ] **TASK-36** — Fix X11 backend silently falling back to Right Ctrl for unrecognized hotkey names.
+- [x] **TASK-36** — Fix X11 backend silently falling back to Right Ctrl for unrecognized hotkey names.
   - **Root cause:** `hotkey_x11.rs:25` — the wildcard arm of `evdev_to_keysym()` returns `XK_Control_R` for any key name not in the match table, masking configuration errors with no log or error. The `HotkeyError::X11Keycode` error message also says "Right Control key not found in X11 keymap" which is misleading.
   - **Fix:** Change `evdev_to_keysym()` to return `Option<c_ulong>`. The wildcard arm returns `None`. In `X11Backend::run()`, handle `None` with `evdev_to_keysym(hotkey).ok_or(HotkeyError::X11Keycode)?`. Update the `X11Keycode` error message to "configured hotkey is not supported on X11".
   - **Files:** `app/src/hotkey_x11.rs`, `app/src/hotkey.rs`
