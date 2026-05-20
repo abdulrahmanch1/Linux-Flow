@@ -69,6 +69,10 @@ setup_uinput() {
         sudo usermod -aG uinput "$USER"
         info "Added $USER to uinput group — a relogin is required."
     fi
+    if ! id -nG "$USER" | grep -qw input; then
+        sudo usermod -aG input "$USER"
+        info "Added $USER to input group — a relogin is required."
+    fi
     sudo udevadm control --reload-rules
     sudo udevadm trigger
 }

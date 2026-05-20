@@ -8,7 +8,7 @@ Wispr Flow-style dictation for Linux. Cloud ASR + LLM rewrite, push-to-talk, way
 - Two processes: tray app + privileged helper (polkit, owns `/dev/uinput`, Unix socket IPC)
 
 ## Pipeline
-1. Hotkey held (default: Right Ctrl) → XDG GlobalShortcuts portal (X11: XGrabKey)
+1. Hotkey held (default: Right Ctrl) → XDG GlobalShortcuts portal (X11: XGrabKey, evdev fallback via `/dev/input/` when both Wayland portal and X11 are unavailable — requires `input` group)
 2. Audio captured via libpipewire (PTT only, mic closed otherwise)
 3. Streamed to Soniox WebSocket (auto-detect, multilingual, code-switching)
 4. On release: full utterance → OpenRouter (`OPENROUTER_API_KEY`, model from `LLM_MODEL`, default `google/gemini-2.0-flash-lite`, with `provider.sort = "throughput"`)
@@ -33,6 +33,7 @@ Wispr Flow-style dictation for Linux. Cloud ASR + LLM rewrite, push-to-talk, way
   - `/usr/local/lib/linux-flow/linux-flow-helper`
   - `/etc/polkit-1/rules.d/50-linux-flow.rules`
   - `/etc/udev/rules.d/60-linux-flow-uinput.rules`
+  - Adds user to `uinput` and `input` groups
   - `~/.config/systemd/user/linux-flow.service` (template)
   - `/usr/share/applications/linux-flow.desktop`
 
