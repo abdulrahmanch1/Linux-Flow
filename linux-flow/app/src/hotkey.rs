@@ -42,7 +42,7 @@ impl HotkeyManager {
         match display::detect() {
             DisplayServer::Wayland => {
                 tokio::spawn(async move {
-                    if let Err(e) = wayland_backend::WaylandBackend::run(tx.clone()).await {
+                    if let Err(e) = wayland_backend::WaylandBackend::run(tx.clone(), hotkey.clone()).await {
                         tracing::warn!("wayland portal unavailable ({e}), trying X11 fallback");
                         if std::env::var_os("DISPLAY").is_some() {
                             std::thread::spawn(move || {

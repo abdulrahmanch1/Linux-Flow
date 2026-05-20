@@ -12,7 +12,7 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(3);
 pub struct WaylandBackend;
 
 impl WaylandBackend {
-    pub async fn run(tx: mpsc::Sender<HotkeyEvent>) -> Result<(), HotkeyError> {
+    pub async fn run(tx: mpsc::Sender<HotkeyEvent>, hotkey: String) -> Result<(), HotkeyError> {
         let shortcuts = tokio::time::timeout(SETUP_TIMEOUT, GlobalShortcuts::new())
             .await
             .map_err(|_| HotkeyError::SetupTimeout)??;
@@ -25,7 +25,7 @@ impl WaylandBackend {
             .bind_shortcuts(
                 &session,
                 &[NewShortcut::new(SHORTCUT_ID, "Push to Talk — linux-flow")
-                    .preferred_trigger("Control_R")],
+                    .preferred_trigger(&*hotkey)],
                 None,
             )
             .await?
