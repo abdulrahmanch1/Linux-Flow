@@ -58,6 +58,8 @@ impl Pipeline {
         loop {
             if !matches!(hotkey.next().await, Some(HotkeyEvent::Pressed)) { break; }
 
+            if let Ok(fresh) = Config::load() { self.config = fresh; }
+
             let mut audio = AudioCapture::new();
             let pcm_rx = match audio.start() {
                 Ok(rx) => rx,

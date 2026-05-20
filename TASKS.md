@@ -136,7 +136,7 @@
   - **Files:** `app/src/wizard.rs`, `app/src/main.rs`
   - **Verified:** `SecretsError::NotFound` is already returned when a key is absent. `resolve_key()` checks env vars first, so users with `SONIOX_API_KEY` / `OPENROUTER_API_KEY` set are unaffected. ✓
 
-- [ ] **TASK-34** — Fix language and model settings not applying until app restart.
+- [x] **TASK-34** — Fix language and model settings not applying until app restart.
   - **Root cause:** `pipeline.rs:72` — `self.config` is loaded once at startup (`main.rs:83`) and never refreshed. Language or model changes saved in Settings are written to disk but never re-read by the running pipeline, violating DESIGN.md "Changes apply immediately without restart".
   - **Fix:** At the start of each recording session, right after the hotkey-press is received and before line 72, add: `if let Ok(fresh) = Config::load() { self.config = fresh; }`. This covers both `soniox.language` (line 72) and `llm.model` (line 104).
   - **Files:** `app/src/pipeline.rs`
