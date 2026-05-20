@@ -136,13 +136,13 @@
   - **Files:** `app/src/wizard.rs`, `app/src/main.rs`
   - **Verified:** `SecretsError::NotFound` is already returned when a key is absent. `resolve_key()` checks env vars first, so users with `SONIOX_API_KEY` / `OPENROUTER_API_KEY` set are unaffected. ✓
 
-- [ ] **TASK-34** — Fix language and model settings not applying until app restart.
+- [x] **TASK-34** — Fix language and model settings not applying until app restart.
   - **Root cause:** `pipeline.rs:72` — `self.config` is loaded once at startup (`main.rs:83`) and never refreshed. Language or model changes saved in Settings are written to disk but never re-read by the running pipeline, violating DESIGN.md "Changes apply immediately without restart".
   - **Fix:** At the start of each recording session, right after the hotkey-press is received and before line 72, add: `if let Ok(fresh) = Config::load() { self.config = fresh; }`. This covers both `soniox.language` (line 72) and `llm.model` (line 104).
   - **Files:** `app/src/pipeline.rs`
   - **Verified:** `Config::load()` is a small synchronous TOML parse that runs before audio capture starts — outside the latency-sensitive path (hotkey release → inject). The `if let Ok` guard silently keeps the old config on any transient read failure, which is the correct fallback. ✓
 
-- [ ] **TASK-35** — Fix silent audio capture failures not surfacing to the user.
+- [x] **TASK-35** — Fix silent audio capture failures not surfacing to the user.
   - **Root cause:** `audio.rs:39-43` — when `capture_loop()` fails, the error goes only to `eprintln!`. The pipeline has no way to detect the failure. The dropped `pcm_tx` causes `pcm_rx` to close immediately; ASR then processes zero audio and returns an empty result; the user sees nothing injected and receives no error notification.
   - **Fix:** Add a `std::sync::mpsc::channel::<AudioError>()` inside `start()`. Return the receiver alongside `pcm_rx`: change the return type to `Result<(mpsc::Receiver<Vec<u8>>, std::sync::mpsc::Receiver<AudioError>), AudioError>`. The thread sends on the error channel before exiting on failure. In `pipeline.rs`, after `audio.stop()` (which joins the thread), call `audio_err_rx.try_recv()`; if an error is present, send `PipelineEvent::Error` and `continue` the loop before processing ASR output.
   - **Files:** `app/src/audio.rs`, `app/src/pipeline.rs`

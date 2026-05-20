@@ -58,9 +58,11 @@ impl Pipeline {
         loop {
             if !matches!(hotkey.next().await, Some(HotkeyEvent::Pressed)) { break; }
 
+            if let Ok(fresh) = Config::load() { self.config = fresh; }
+
             let mut audio = AudioCapture::new();
-            let pcm_rx = match audio.start() {
-                Ok(rx) => rx,
+            let (pcm_rx, audio_err_rx) = match audio.start() {
+                Ok(pair) => pair,
                 Err(e) => {
                     let _ = events.send(PipelineEvent::Error(format!("Audio capture failed: {e}"))).await;
                     continue;
@@ -80,6 +82,10 @@ impl Pipeline {
                 }
             }
             tokio::task::spawn_blocking(move || audio.stop()).await.ok();
+            if let Ok(e) = audio_err_rx.try_recv() {
+                let _ = events.send(PipelineEvent::Error(format!("Audio capture failed: {e}"))).await;
+                continue;
+            }
             let _ = events.send(PipelineEvent::ProcessingStarted).await;
 
             let asr_joined = asr.await;

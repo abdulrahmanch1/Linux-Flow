@@ -32,17 +32,20 @@ impl AudioCapture {
         Self { stop_flag: Arc::new(AtomicBool::new(false)), thread: None }
     }
 
-    pub fn start(&mut self) -> Result<mpsc::Receiver<Vec<u8>>, AudioError> {
+    pub fn start(
+        &mut self,
+    ) -> Result<(mpsc::Receiver<Vec<u8>>, std::sync::mpsc::Receiver<AudioError>), AudioError> {
         self.stop_flag.store(false, Ordering::Relaxed);
         let stop = Arc::clone(&self.stop_flag);
         let (pcm_tx, pcm_rx) = mpsc::channel(512);
+        let (err_tx, err_rx) = std::sync::mpsc::channel::<AudioError>();
         let handle = thread::spawn(move || {
             if let Err(e) = capture_loop(pcm_tx, stop) {
-                eprintln!("linux-flow audio: {e}");
+                let _ = err_tx.send(e);
             }
         });
         self.thread = Some(handle);
-        Ok(pcm_rx)
+        Ok((pcm_rx, err_rx))
     }
 
     pub fn stop(&mut self) {
