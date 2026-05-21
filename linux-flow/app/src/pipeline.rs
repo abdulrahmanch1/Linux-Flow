@@ -120,7 +120,8 @@ impl Pipeline {
                     )).await;
                     continue;
                 }
-                Err(_) => {
+                Err(e) => {
+                    tracing::warn!("pipeline: llm error: {e}");
                     raw.zeroize();
                     let _ = events.send(PipelineEvent::Error(
                         "Could not reach OpenRouter. Check your connection.".into(),

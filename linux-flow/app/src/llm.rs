@@ -6,8 +6,8 @@ use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SYSTEM_PROMPT: &str = "You are a transcript editor. \
 Apply these transformations and output only the result:\n\
