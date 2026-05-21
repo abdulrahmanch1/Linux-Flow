@@ -24,25 +24,6 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let openrouter_key_row = adw::PasswordEntryRow::new();
     openrouter_key_row.set_title("OpenRouter API Key");
 
-    hotkey_row.connect_apply(|r| {
-        let v = r.text().to_string();
-        if !v.is_empty() { patch_config(|c| c.general.hotkey = v); }
-    });
-    lang_row.connect_apply(|r| {
-        let v = r.text().to_string();
-        if !v.is_empty() { patch_config(|c| c.soniox.language = v); }
-    });
-    model_row.connect_apply(|r| {
-        let v = r.text().to_string();
-        if !v.is_empty() { patch_config(|c| c.llm.model = v); }
-    });
-
-    let soniox_btn = confirm_button();
-    soniox_key_row.add_suffix(&soniox_btn);
-
-    let openrouter_btn = confirm_button();
-    openrouter_key_row.add_suffix(&openrouter_btn);
-
     let general = adw::PreferencesGroup::new();
     general.set_title("General");
     general.add(&hotkey_row);
@@ -57,55 +38,44 @@ pub fn build_settings() -> adw::PreferencesWindow {
     llm_grp.add(&model_row);
     llm_grp.add(&openrouter_key_row);
 
+    let confirm_btn = gtk4::Button::with_label("Confirm");
+    confirm_btn.add_css_class("suggested-action");
+    confirm_btn.add_css_class("pill");
+
+    let btn_grp = adw::PreferencesGroup::new();
+    btn_grp.add(&confirm_btn);
+
     let page = adw::PreferencesPage::new();
     page.add(&general);
     page.add(&speech);
     page.add(&llm_grp);
+    page.add(&btn_grp);
 
     let window = adw::PreferencesWindow::new();
     window.set_title(Some("linux-flow Settings"));
     window.set_default_size(480, -1);
     window.add(&page);
 
-    soniox_btn.connect_clicked({
-        let row = soniox_key_row.clone();
+    confirm_btn.connect_clicked({
         let win = window.clone();
-        move |_| save_key_and_close("soniox", &row, &win)
-    });
-    soniox_key_row.connect_apply({
-        let win = window.clone();
-        move |r| save_key_and_close("soniox", r, &win)
-    });
-    openrouter_btn.connect_clicked({
-        let row = openrouter_key_row.clone();
-        let win = window.clone();
-        move |_| save_key_and_close("openrouter", &row, &win)
-    });
-    openrouter_key_row.connect_apply({
-        let win = window.clone();
-        move |r| save_key_and_close("openrouter", r, &win)
+        move |_| {
+            patch_config(|c| {
+                let v = hotkey_row.text().to_string();
+                if !v.is_empty() { c.general.hotkey = v; }
+                let v = lang_row.text().to_string();
+                if !v.is_empty() { c.soniox.language = v; }
+                let v = model_row.text().to_string();
+                if !v.is_empty() { c.llm.model = v; }
+            });
+            let soniox_v = Zeroizing::new(soniox_key_row.text().to_string());
+            if !soniox_v.is_empty() { spawn_save_key("soniox", soniox_v); }
+            let or_v = Zeroizing::new(openrouter_key_row.text().to_string());
+            if !or_v.is_empty() { spawn_save_key("openrouter", or_v); }
+            win.close();
+        }
     });
 
     window
-}
-
-fn confirm_button() -> gtk4::Button {
-    let btn = gtk4::Button::with_label("Confirm");
-    btn.add_css_class("suggested-action");
-    btn.set_valign(gtk4::Align::Center);
-    btn
-}
-
-fn save_key_and_close(
-    service: &'static str,
-    row: &adw::PasswordEntryRow,
-    win: &adw::PreferencesWindow,
-) {
-    let v = Zeroizing::new(row.text().to_string());
-    if !v.is_empty() {
-        spawn_save_key(service, v);
-        win.close();
-    }
 }
 
 fn patch_config(update: impl FnOnce(&mut Config)) {
