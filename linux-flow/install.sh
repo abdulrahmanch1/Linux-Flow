@@ -96,16 +96,29 @@ enable_service() {
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+pkg_install() {
+    local pkg="$1"
+    info "Installing $pkg..."
+    if   command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y "$pkg" >/dev/null
+    elif command -v dnf     >/dev/null 2>&1; then sudo dnf     install -y "$pkg" >/dev/null
+    elif command -v pacman  >/dev/null 2>&1; then sudo pacman  -S --noconfirm "$pkg" >/dev/null
+    else die "$pkg is required but no supported package manager was found — install it manually"
+    fi
+}
+
+ensure_clipboard_tool() {
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        command -v wl-copy >/dev/null 2>&1 || pkg_install wl-clipboard
+    else
+        command -v xclip   >/dev/null 2>&1 || pkg_install xclip
+    fi
+}
+
 main() {
     need sudo
     need udevadm
     need systemctl
-    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-        command -v wl-copy >/dev/null 2>&1 \
-            || die "wl-copy not found — install it: sudo apt install wl-clipboard"
-    else
-        need xclip
-    fi
+    ensure_clipboard_tool
 
     local src
     src=$(find_src)
