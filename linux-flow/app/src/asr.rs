@@ -117,18 +117,19 @@ pub async fn transcribe(
         }
     }
 
-    // EOS: empty binary frame followed by WebSocket close signals end of audio.
+    // EOS: empty binary frame signals end of audio to Soniox.
     if let Err(e) = sink.send(Message::Binary(vec![])).await {
         read_task.abort();
         return Err(AsrError::WebSocket(e));
     }
-    // Closing the write half flushes any buffered data and tells Soniox the
-    // upload is complete so it can finalise and send "finished": true.
-    drop(sink);
+    // Close the WebSocket write side; this sends a Close frame so Soniox
+    // knows the upload is complete and can finalise, sending "finished": true.
+    let _ = sink.close().await;
+    let abort = read_task.abort_handle();
 
     // Wait for the final transcript. 15 s timeout starts here (after EOS).
     timeout(STREAM_TIMEOUT, read_task)
         .await
-        .map_err(|_| AsrError::StreamTimeout)?
+        .map_err(|_| { abort.abort(); AsrError::StreamTimeout })?
         .map_err(|e| AsrError::Stream(e.to_string()))?
 }
