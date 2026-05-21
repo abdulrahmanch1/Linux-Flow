@@ -121,8 +121,8 @@ pub async fn transcribe(
         }
     }
 
-    // EOS: empty binary frame signals end of audio to Soniox.
-    if let Err(e) = sink.send(Message::Binary(vec![])).await {
+    // EOS: empty text frame signals end of audio to Soniox (their SDK uses ws.send("")).
+    if let Err(e) = sink.send(Message::Text(String::new())).await {
         read_task.abort();
         return Err(AsrError::WebSocket(e));
     }
