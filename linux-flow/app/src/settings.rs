@@ -26,34 +26,22 @@ pub fn build_settings() -> adw::PreferencesWindow {
 
     hotkey_row.connect_apply(|r| {
         let v = r.text().to_string();
-        if !v.is_empty() {
-            patch_config(|c| c.general.hotkey = v);
-        }
+        if !v.is_empty() { patch_config(|c| c.general.hotkey = v); }
     });
     lang_row.connect_apply(|r| {
         let v = r.text().to_string();
-        if !v.is_empty() {
-            patch_config(|c| c.soniox.language = v);
-        }
+        if !v.is_empty() { patch_config(|c| c.soniox.language = v); }
     });
     model_row.connect_apply(|r| {
         let v = r.text().to_string();
-        if !v.is_empty() {
-            patch_config(|c| c.llm.model = v);
-        }
+        if !v.is_empty() { patch_config(|c| c.llm.model = v); }
     });
-    soniox_key_row.connect_apply(|r| {
-        let v = Zeroizing::new(r.text().to_string());
-        if !v.is_empty() {
-            spawn_save_key("soniox", v);
-        }
-    });
-    openrouter_key_row.connect_apply(|r| {
-        let v = Zeroizing::new(r.text().to_string());
-        if !v.is_empty() {
-            spawn_save_key("openrouter", v);
-        }
-    });
+
+    let soniox_btn = confirm_button();
+    soniox_key_row.add_suffix(&soniox_btn);
+
+    let openrouter_btn = confirm_button();
+    openrouter_key_row.add_suffix(&openrouter_btn);
 
     let general = adw::PreferencesGroup::new();
     general.set_title("General");
@@ -78,7 +66,46 @@ pub fn build_settings() -> adw::PreferencesWindow {
     window.set_title(Some("linux-flow Settings"));
     window.set_default_size(480, -1);
     window.add(&page);
+
+    soniox_btn.connect_clicked({
+        let row = soniox_key_row.clone();
+        let win = window.clone();
+        move |_| save_key_and_close("soniox", &row, &win)
+    });
+    soniox_key_row.connect_apply({
+        let win = window.clone();
+        move |r| save_key_and_close("soniox", r, &win)
+    });
+    openrouter_btn.connect_clicked({
+        let row = openrouter_key_row.clone();
+        let win = window.clone();
+        move |_| save_key_and_close("openrouter", &row, &win)
+    });
+    openrouter_key_row.connect_apply({
+        let win = window.clone();
+        move |r| save_key_and_close("openrouter", r, &win)
+    });
+
     window
+}
+
+fn confirm_button() -> gtk4::Button {
+    let btn = gtk4::Button::with_label("Confirm");
+    btn.add_css_class("suggested-action");
+    btn.set_valign(gtk4::Align::Center);
+    btn
+}
+
+fn save_key_and_close(
+    service: &'static str,
+    row: &adw::PasswordEntryRow,
+    win: &adw::PreferencesWindow,
+) {
+    let v = Zeroizing::new(row.text().to_string());
+    if !v.is_empty() {
+        spawn_save_key(service, v);
+        win.close();
+    }
 }
 
 fn patch_config(update: impl FnOnce(&mut Config)) {
@@ -93,6 +120,5 @@ fn spawn_save_key(service: &'static str, value: Zeroizing<String>) {
             .enable_all()
             .build()
             .map(|rt| rt.block_on(crate::secrets::store_key(service, &value)));
-        // value is Zeroized on drop
     });
 }
