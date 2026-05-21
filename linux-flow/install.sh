@@ -37,9 +37,6 @@ find_src() {
 
 build() {
     local src="$1"
-    if [[ -x "$src/target/release/linux-flow" && -x "$src/target/release/linux-flow-helper" ]]; then
-        return
-    fi
     need cargo
     info "Building (this may take a few minutes)..."
     (cd "$src" && cargo build --release --quiet)
