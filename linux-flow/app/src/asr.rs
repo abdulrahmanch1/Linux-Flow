@@ -11,7 +11,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const SONIOX_URL: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-const STREAM_TIMEOUT: Duration = Duration::from_secs(8);
+const STREAM_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Error)]
 pub enum AsrError {
@@ -117,13 +117,16 @@ pub async fn transcribe(
         }
     }
 
-    // EOS: empty binary frame signals end of audio to Soniox.
+    // EOS: empty binary frame followed by WebSocket close signals end of audio.
     if let Err(e) = sink.send(Message::Binary(vec![])).await {
         read_task.abort();
         return Err(AsrError::WebSocket(e));
     }
+    // Closing the write half flushes any buffered data and tells Soniox the
+    // upload is complete so it can finalise and send "finished": true.
+    drop(sink);
 
-    // Wait for the final transcript. 8 s timeout starts here (after EOS).
+    // Wait for the final transcript. 15 s timeout starts here (after EOS).
     timeout(STREAM_TIMEOUT, read_task)
         .await
         .map_err(|_| AsrError::StreamTimeout)?
