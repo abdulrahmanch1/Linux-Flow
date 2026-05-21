@@ -36,6 +36,7 @@ struct AppTray {
     state: TrayState,
     frame: usize,
     wave_frames: Vec<Vec<u8>>,
+    proc_frames: Vec<Vec<u8>>,
     quit_tx: mpsc::Sender<()>,
     settings_tx: stdmpsc::SyncSender<()>,
     about_tx: stdmpsc::SyncSender<()>,
@@ -49,17 +50,21 @@ impl Tray for AppTray {
         match self.state {
             TrayState::Idle => "audio-input-microphone".into(),
             TrayState::Recording => "media-record".into(),
-            TrayState::Processing => "emblem-synchronizing".into(),
+            TrayState::Processing => "audio-input-microphone".into(),
             TrayState::Error => "dialog-warning".into(),
         }
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        if self.state != TrayState::Recording { return vec![]; }
+        let frames = match self.state {
+            TrayState::Recording => &self.wave_frames,
+            TrayState::Processing => &self.proc_frames,
+            _ => return vec![],
+        };
         vec![Icon {
             width: ICON_SIZE as i32,
             height: ICON_SIZE as i32,
-            data: self.wave_frames[self.frame].clone(),
+            data: frames[self.frame].clone(),
         }]
     }
 
@@ -90,7 +95,7 @@ impl Tray for AppTray {
     }
 }
 
-fn make_wave_frames() -> Vec<Vec<u8>> {
+fn make_wave_frames(color: [u8; 4]) -> Vec<Vec<u8>> {
     (0..WAVE_FRAMES)
         .map(|frame| {
             let mut data = vec![0u8; ICON_SIZE * ICON_SIZE * 4];
@@ -101,7 +106,7 @@ fn make_wave_frames() -> Vec<Vec<u8>> {
                 let height = ((phase.sin() * 0.35 + 0.55) * ICON_SIZE as f64) as usize;
                 for y in (ICON_SIZE - height.min(ICON_SIZE))..ICON_SIZE {
                     let i = (y * ICON_SIZE + x) * 4;
-                    data[i..i + 4].copy_from_slice(&[0xFF, 0x4C, 0xAF, 0x50]);
+                    data[i..i + 4].copy_from_slice(&color);
                 }
             }
             data
@@ -117,7 +122,8 @@ pub async fn spawn_tray(
     let handle = AppTray {
         state: TrayState::Idle,
         frame: 0,
-        wave_frames: make_wave_frames(),
+        wave_frames: make_wave_frames([0xFF, 0x4C, 0xAF, 0x50]),
+        proc_frames: make_wave_frames([0xFF, 0x42, 0xA5, 0xF5]),
         quit_tx,
         settings_tx,
         about_tx,
@@ -133,7 +139,7 @@ pub async fn spawn_tray(
             tick.tick().await;
             if anim
                 .update(|t| {
-                    if t.state == TrayState::Recording {
+                    if matches!(t.state, TrayState::Recording | TrayState::Processing) {
                         t.frame = (t.frame + 1) % WAVE_FRAMES;
                     }
                 })

@@ -65,14 +65,15 @@ impl Pipeline {
             let language = self.config.soniox.language.clone();
             let asr = tokio::spawn(async move { asr::transcribe(soniox_key, &language, pcm_rx).await });
 
-            loop {
+            let released = loop {
                 match hotkey.next().await {
-                    Some(HotkeyEvent::Released) => break,
+                    Some(HotkeyEvent::Released) => break true,
                     Some(HotkeyEvent::Pressed) => {}
-                    None => return,
+                    None => break false,
                 }
-            }
+            };
             tokio::task::spawn_blocking(move || audio.stop()).await.ok();
+            if !released { asr.abort(); return; }
             if let Ok(e) = audio_err_rx.try_recv() {
                 let _ = events.send(PipelineEvent::Error(format!("Audio capture failed: {e}"))).await;
                 continue;
