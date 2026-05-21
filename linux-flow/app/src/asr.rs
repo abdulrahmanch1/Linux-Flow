@@ -11,7 +11,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const SONIOX_URL: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-const STREAM_TIMEOUT: Duration = Duration::from_secs(15);
+const STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
 pub enum AsrError {
@@ -91,6 +91,10 @@ pub async fn transcribe(
                 Err(e) => return Err(AsrError::WebSocket(e)),
             };
             let resp: SonioxResponse = serde_json::from_str(&text)?;
+            tracing::info!(
+                "asr: msg error={} finished={} tokens={}",
+                resp.error_code, resp.finished, resp.tokens.len()
+            );
             if resp.error_code == 401 {
                 return Err(AsrError::Unauthorized);
             }
@@ -122,14 +126,15 @@ pub async fn transcribe(
         read_task.abort();
         return Err(AsrError::WebSocket(e));
     }
-    // Close the WebSocket write side; this sends a Close frame so Soniox
-    // knows the upload is complete and can finalise, sending "finished": true.
-    let _ = sink.close().await;
+    tracing::info!("asr: EOS sent — waiting up to 30 s for finished");
     let abort = read_task.abort_handle();
 
-    // Wait for the final transcript. 15 s timeout starts here (after EOS).
-    timeout(STREAM_TIMEOUT, read_task)
+    // Keep sink alive so the WebSocket stays open while Soniox finalises.
+    // 30 s timeout starts after EOS.
+    let result = timeout(STREAM_TIMEOUT, read_task)
         .await
         .map_err(|_| { abort.abort(); AsrError::StreamTimeout })?
-        .map_err(|e| AsrError::Stream(e.to_string()))?
+        .map_err(|e| AsrError::Stream(e.to_string()))?;
+    drop(sink);
+    result
 }
