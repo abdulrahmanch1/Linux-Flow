@@ -60,6 +60,7 @@ impl Pipeline {
                 }
             };
             let _ = events.send(PipelineEvent::RecordingStarted).await;
+            tracing::info!("pipeline: recording started");
 
             let soniox_key = self.soniox_key.clone();
             let language = self.config.soniox.language.clone();
@@ -72,15 +73,19 @@ impl Pipeline {
                     None => break false,
                 }
             };
+            tracing::info!("pipeline: hotkey released={released}");
             tokio::task::spawn_blocking(move || audio.stop()).await.ok();
+            tracing::info!("pipeline: audio stopped");
             if !released { asr.abort(); return; }
             if let Ok(e) = audio_err_rx.try_recv() {
                 let _ = events.send(PipelineEvent::Error(format!("Audio capture failed: {e}"))).await;
                 continue;
             }
             let _ = events.send(PipelineEvent::ProcessingStarted).await;
+            tracing::info!("pipeline: asr waiting");
 
             let asr_joined = asr.await;
+            tracing::info!("pipeline: asr done ok={}", asr_joined.as_ref().map(|r| r.is_ok()).unwrap_or(false));
             if let Ok(Err(AsrError::Unauthorized)) = &asr_joined {
                 let _ = secrets::resolve_key("SONIOX_API_KEY", "soniox").await
                     .map(|k| self.soniox_key = k);
@@ -100,7 +105,9 @@ impl Pipeline {
             };
 
             let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
+            tracing::info!("pipeline: llm start");
             let llm_res = self.llm.rewrite(self.or_key.clone(), &model, &raw).await;
+            tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
             let (mut text, fallback) = match llm_res {
                 Ok(t) => (Zeroizing::new(t), false),
                 Err(LlmError::EmptyResponse) => (std::mem::replace(&mut raw, Zeroizing::new(String::new())), true),
@@ -124,11 +131,13 @@ impl Pipeline {
             raw.zeroize();
             if fallback { let _ = events.send(PipelineEvent::LlmFallback).await; }
 
+            tracing::info!("pipeline: inject start");
             match inject_text(text.as_str()).await {
-                Ok(()) => { let _ = events.send(PipelineEvent::TextInjected).await; }
-                Err(msg) => { let _ = events.send(PipelineEvent::Error(msg)).await; }
+                Ok(()) => { let _ = events.send(PipelineEvent::TextInjected).await; tracing::info!("pipeline: inject ok"); }
+                Err(msg) => { tracing::warn!("pipeline: inject err: {msg}"); let _ = events.send(PipelineEvent::Error(msg)).await; }
             }
             text.zeroize();
+            tracing::info!("pipeline: session complete — waiting for next press");
         }
     }
 }
