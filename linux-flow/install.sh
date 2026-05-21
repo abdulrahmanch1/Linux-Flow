@@ -100,6 +100,12 @@ main() {
     need sudo
     need udevadm
     need systemctl
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        command -v wl-copy >/dev/null 2>&1 \
+            || die "wl-copy not found — install it: sudo apt install wl-clipboard"
+    else
+        need xclip
+    fi
 
     local src
     src=$(find_src)
