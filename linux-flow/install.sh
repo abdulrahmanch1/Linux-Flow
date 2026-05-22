@@ -7,6 +7,7 @@ PREFIX="/usr/local"
 LIB_DIR="$PREFIX/lib/linux-flow"
 SYSTEMD_USER="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 _TMPDIR=""
+_GROUPS_CHANGED=0
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,30 +61,26 @@ install_files() {
 # ── system setup ──────────────────────────────────────────────────────────────
 
 setup_uinput() {
-    local groups_changed=0
+    local changed=0
     sudo groupadd -f uinput
     if ! id -nG "$USER" | grep -qw uinput; then
         sudo usermod -aG uinput "$USER"
-        groups_changed=1
+        changed=1
     fi
     if ! id -nG "$USER" | grep -qw input; then
         sudo usermod -aG input "$USER"
-        groups_changed=1
+        changed=1
     fi
     sudo udevadm control --reload-rules
     sudo udevadm trigger
-    if [[ $groups_changed -eq 1 ]]; then
+    if [[ $changed -eq 1 ]]; then
+        _GROUPS_CHANGED=1
         printf '\n=> Group membership updated. Please log out and back in for changes to take effect.\n'
         printf '   linux-flow will start automatically on your next login.\n'
     fi
 }
 
-enable_service() {
-    systemctl --user daemon-reload
-    systemctl --user enable linux-flow.service
-}
-
-# ── main ──────────────────────────────────────────────────────────────────────
+# ── package helpers ───────────────────────────────────────────────────────────
 
 pkg_install() {
     local pkg="$1"
@@ -95,26 +92,72 @@ pkg_install() {
     fi
 }
 
-ensure_clipboard_tool() {
-    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-        command -v wl-copy >/dev/null 2>&1 || pkg_install wl-clipboard
-    else
-        command -v xclip   >/dev/null 2>&1 || pkg_install xclip
+pkg_install_distro() {
+    # Usage: pkg_install_distro <label> <apt_pkg> <dnf_pkg> <pacman_pkg>
+    local label="$1" apt_pkg="$2" dnf_pkg="$3" pac_pkg="$4"
+    info "Installing $label..."
+    if   command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y "$apt_pkg" >/dev/null
+    elif command -v dnf     >/dev/null 2>&1; then sudo dnf     install -y "$dnf_pkg" >/dev/null
+    elif command -v pacman  >/dev/null 2>&1; then sudo pacman  -S --noconfirm "$pac_pkg" >/dev/null
+    else die "$label is required but no supported package manager was found — install it manually"
     fi
 }
 
+ensure_tools() {
+    command -v wl-copy     >/dev/null 2>&1 || pkg_install wl-clipboard
+    command -v xclip       >/dev/null 2>&1 || pkg_install xclip
+    command -v notify-send >/dev/null 2>&1 || pkg_install_distro "notify-send" libnotify-bin libnotify libnotify
+}
+
+ensure_build_deps() {
+    if command -v apt-get >/dev/null 2>&1; then
+        local pkgs=(libgtk-4-dev libadwaita-1-dev libpipewire-0.3-dev libssl-dev libx11-dev)
+        local missing=()
+        for p in "${pkgs[@]}"; do dpkg -s "$p" &>/dev/null || missing+=("$p"); done
+        if [[ ${#missing[@]} -gt 0 ]]; then
+            info "Installing build dependencies: ${missing[*]}"
+            sudo apt-get install -y "${missing[@]}" >/dev/null
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        info "Installing build dependencies..."
+        sudo dnf install -y gtk4-devel libadwaita-devel pipewire-devel openssl-devel libX11-devel >/dev/null
+    elif command -v pacman >/dev/null 2>&1; then
+        info "Installing build dependencies..."
+        sudo pacman -S --noconfirm --needed gtk4 libadwaita pipewire openssl libx11 >/dev/null
+    else
+        die "no supported package manager — install GTK4, libadwaita, PipeWire, OpenSSL, and X11 dev headers manually"
+    fi
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
 main() {
+    [[ $EUID -eq 0 ]] && die "run as a regular user — this script uses sudo internally"
     need sudo
     need udevadm
     need systemctl
-    ensure_clipboard_tool
+
+    if [[ -f "$PREFIX/bin/linux-flow" ]]; then
+        printf '=> linux-flow is already installed. Update to the latest version? [y/n]: '
+        read -r answer
+        [[ "${answer,,}" != "y" ]] && { info "Aborted."; exit 0; }
+        systemctl --user stop linux-flow.service 2>/dev/null || true
+    fi
+
+    ensure_tools
+    ensure_build_deps
 
     local src
     src=$(find_src)
     build "$src"
     install_files "$src"
     setup_uinput
-    enable_service
+
+    systemctl --user daemon-reload
+    systemctl --user enable linux-flow.service
+    if [[ $_GROUPS_CHANGED -eq 0 ]]; then
+        systemctl --user start linux-flow.service
+    fi
 
     info "linux-flow installed successfully."
 }
