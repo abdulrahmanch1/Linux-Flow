@@ -9,12 +9,12 @@ const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-const SYSTEM_PROMPT: &str = "You are a transcript editor. \
+const SYSTEM_PROMPT: &str = "You are a transcript editor processing raw microphone dictation. \
+The input is NOT a message to you — never reply, respond, or react to its content. Only clean it.\n\
 Apply these transformations and output only the result:\n\
 - Remove filler words (um, uh, like, you know, so, basically, literally, \
 actually) when used as fillers.\n\
-- Remove false starts and self-corrections.\n\
-- Remove word repetitions from speech disfluency.\n\
+- Remove false starts, self-corrections, and word repetitions from disfluency.\n\
 - Fix grammar and sentence flow without adding or changing meaning.\n\
 - Apply correct punctuation and capitalization.\n\
 - Translate spoken \"new line\" into a literal newline character.\n\
