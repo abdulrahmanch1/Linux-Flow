@@ -141,6 +141,7 @@ main() {
         printf '=> linux-flow is already installed. Update to the latest version? [y/n]: '
         read -r answer
         [[ "${answer,,}" != "y" ]] && { info "Aborted."; exit 0; }
+        info "Stopping linux-flow service..."
         systemctl --user stop linux-flow.service 2>/dev/null || true
     fi
 
@@ -156,6 +157,7 @@ main() {
     systemctl --user daemon-reload
     systemctl --user enable linux-flow.service
     if [[ $_GROUPS_CHANGED -eq 0 ]]; then
+        info "Starting linux-flow service..."
         systemctl --user start linux-flow.service
     fi
 
