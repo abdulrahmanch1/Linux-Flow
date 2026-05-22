@@ -131,7 +131,8 @@ impl Inner {
         display: DisplayServer,
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text)?;
-        thread::sleep(Duration::from_millis(20));
+        // Give the compositor time to register the new clipboard contents.
+        thread::sleep(Duration::from_millis(100));
         self.key_event(keys::KEY_LEFTCTRL, true)?;
         self.key_event(keys::KEY_V, true)?;
         self.key_event(keys::KEY_V, false)?;

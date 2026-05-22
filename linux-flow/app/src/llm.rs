@@ -25,7 +25,7 @@ actually) when used as fillers.\n\
 
 #[derive(Debug, Error)]
 pub enum LlmError {
-    #[error("request timed out (5 s)")]
+    #[error("request timed out (20 s)")]
     Timeout,
     #[error("invalid OpenRouter API key (401)")]
     Unauthorized,
@@ -38,7 +38,6 @@ pub enum LlmError {
 }
 
 // ── request types ────────────────────────────────────────────────────────────
-
 #[derive(Serialize)]
 struct ChatMessage<'a> {
     role: &'a str,
@@ -131,6 +130,8 @@ impl LlmClient {
             return Err(LlmError::Unauthorized);
         }
         if !status.is_success() {
+            let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+            tracing::warn!("llm: HTTP {} — {}", status.as_u16(), body);
             return Err(LlmError::Http(status.as_u16()));
         }
 

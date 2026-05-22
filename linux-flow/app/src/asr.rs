@@ -17,7 +17,7 @@ const STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum AsrError {
     #[error("connection timed out (3 s)")]
     ConnectTimeout,
-    #[error("stream timed out after EOS (8 s)")]
+    #[error("stream timed out after EOS (30 s)")]
     StreamTimeout,
     #[error("invalid Soniox API key (401)")]
     Unauthorized,

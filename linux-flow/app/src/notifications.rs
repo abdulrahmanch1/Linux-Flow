@@ -46,7 +46,7 @@ pub async fn handle_events(
 }
 
 async fn notify_desktop(body: &str) {
-    let _ = tokio::process::Command::new("/usr/bin/notify-send")
+    let _ = tokio::process::Command::new("notify-send")
         .args(["--app-name=linux-flow", "--icon=dialog-warning", "linux-flow", body])
         .status()
         .await;

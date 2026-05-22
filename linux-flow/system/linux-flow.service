@@ -1,10 +1,11 @@
 [Unit]
 Description=linux-flow Privileged Input Helper
-After=network.target
+After=graphical-session.target
 
 [Service]
 Type=simple
 ExecStart=/usr/local/lib/linux-flow/linux-flow-helper
+PassEnvironment=WAYLAND_DISPLAY DISPLAY
 Restart=on-failure
 RestartSec=2
 

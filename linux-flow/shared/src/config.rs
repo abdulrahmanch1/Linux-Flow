@@ -46,7 +46,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             general: General { hotkey: "KEY_RIGHTCTRL".into() },
-            llm: Llm { model: "google/gemini-3.1-flash-lite".into() },
+            llm: Llm { model: "google/gemini-2.0-flash-lite".into() },
             soniox: Soniox { language: "auto".into() },
             ui: Ui { show_tray: true },
         }

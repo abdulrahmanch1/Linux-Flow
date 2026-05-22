@@ -25,7 +25,6 @@ remove_files() {
     sudo rmdir --ignore-fail-on-non-empty "$PREFIX/lib/linux-flow" 2>/dev/null || true
 
     info "Removing system files..."
-    sudo rm -f /etc/polkit-1/rules.d/50-linux-flow.rules
     sudo rm -f /etc/udev/rules.d/60-linux-flow-uinput.rules
     sudo rm -f /usr/share/applications/linux-flow.desktop
     rm  -f "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/linux-flow.desktop"

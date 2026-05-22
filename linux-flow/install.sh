@@ -51,7 +51,6 @@ install_files() {
     sudo install -Dm755 "$src/target/release/linux-flow-helper" "$LIB_DIR/linux-flow-helper"
 
     info "Installing system files..."
-    sudo install -Dm644 "$src/system/50-linux-flow.rules"        /etc/polkit-1/rules.d/50-linux-flow.rules
     sudo install -Dm644 "$src/system/60-linux-flow-uinput.rules" /etc/udev/rules.d/60-linux-flow-uinput.rules
     sudo install -Dm644 "$src/system/linux-flow.desktop"         /usr/share/applications/linux-flow.desktop
     install     -Dm644 "$src/system/linux-flow.desktop"         "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/linux-flow.desktop"
@@ -74,21 +73,14 @@ setup_uinput() {
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     if [[ $groups_changed -eq 1 ]]; then
-        printf '\n=> Group membership updated. A restart is required for changes to take effect.\n'
-        printf '   Restart now? [y/n]: '
-        read -r answer
-        if [[ "${answer,,}" == "y" ]]; then
-            info "Restarting..."
-            sudo systemctl reboot
-        else
-            info "Please restart manually before using linux-flow."
-        fi
+        printf '\n=> Group membership updated. Please log out and back in for changes to take effect.\n'
+        printf '   linux-flow will start automatically on your next login.\n'
     fi
 }
 
 enable_service() {
     systemctl --user daemon-reload
-    systemctl --user enable --now linux-flow.service
+    systemctl --user enable linux-flow.service
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────

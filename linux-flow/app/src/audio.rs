@@ -120,5 +120,6 @@ fn capture_loop(
         &mut [params_pod],
     )?;
     mainloop.run();
+    stream.disconnect().map_err(AudioError::PipeWire)?;
     Ok(())
 }
