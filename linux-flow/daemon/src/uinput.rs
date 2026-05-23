@@ -81,8 +81,6 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        // Wait for the compositor to settle after hotkey release before injecting.
-        thread::sleep(Duration::from_millis(50));
         let latin_only =
             text.is_ascii() && text.chars().all(|c| keymap::char_to_key(c).is_some());
         if latin_only {
