@@ -16,6 +16,7 @@ stop_service() {
         systemctl --user disable linux-flow.service
     fi
     systemctl --user daemon-reload
+    pkill -x linux-flow 2>/dev/null || true
 }
 
 remove_files() {
@@ -42,6 +43,7 @@ main() {
     remove_files
     reload_services
     info "linux-flow uninstalled. Config in ~/.config/linux-flow was left intact."
+    info "If the app icon is still visible in the launcher, log out and back in."
 }
 
 main "$@"
