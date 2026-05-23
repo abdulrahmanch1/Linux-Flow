@@ -170,6 +170,37 @@
 
 ---
 
+### [H-09] Text injection fails when a non-English keyboard layout is active
+- **Files:** `daemon/src/uinput_inner.rs`, `daemon/src/uinput.rs`, `daemon/src/keys.rs`
+- **Reported by:** user — Arabic, Hindi, Kurdish, Persian layouts confirmed affected.
+- **Root cause:** `uinput` injects raw Linux scancodes (physical key positions), not Unicode characters. The compositor applies the active XKB layout on top, so the logical character produced depends on what layout the user has active at the moment of injection. Two code paths are both broken:
+
+  **Path 1 — `inject_latin_char` (ASCII text, `uinput.rs:86`):**
+  Sends `KEY_A`, `KEY_B`, … as physical keycodes. With Arabic layout active, `KEY_A` produces `'ش'`, `KEY_S` produces `'س'`, etc. English ASCII text gets injected as wrong Arabic characters.
+
+  **Path 2 — `inject_via_clipboard` (non-ASCII text, `uinput_inner.rs:128`):**
+  Writes correct text to clipboard via `wl-copy`/`xclip` (layout-independent ✓), then sends `KEY_LEFTCTRL + KEY_V` (physical keycodes). With Arabic layout, the compositor maps the physical V key to `'ر'` (or similar), so the shortcut becomes `Ctrl+ر` — which is not the paste binding in most applications → nothing is pasted.
+  This explains why the user must switch to English layout: only then does `KEY_V` produce the logical `'v'` that applications recognize as `Ctrl+v` = paste.
+
+- **Fix:**
+  Replace `KEY_LEFTCTRL + KEY_V` in `inject_via_clipboard` with `KEY_PASTE` (Linux keycode `0x161 = 353`), a dedicated layout-independent paste event that compositors and applications handle without going through the XKB layer:
+  ```rust
+  // keys.rs — add:
+  pub const KEY_PASTE: u16 = 0x161;
+
+  // uinput_inner.rs — ALL_KEYS: add KEY_PASTE to capabilities
+
+  // inject_via_clipboard — replace Ctrl+V block with:
+  self.key_event(keys::KEY_PASTE, true)?;
+  self.key_event(keys::KEY_PASTE, false)?;
+  ```
+  For Path 1 (inject_latin_char), the correct fix is to route ALL text through the clipboard path and drop the keycode-per-character approach entirely. The keycode path is inherently layout-dependent and cannot be made layout-neutral without access to the compositor's XKB state.
+
+- **Impact:** Any user with a non-Latin keyboard layout cannot use the app at all. This includes all Arabic, Hindi, Persian, Kurdish users — the primary multilingual audience for a dictation tool.
+- [ ] **Status: Open**
+
+---
+
 ## 🟡 Medium — Quality and Incorrect Behaviour
 
 ### [M-01] `IpcRequest` derives `Clone` — dictation text can be silently copied
@@ -381,7 +412,7 @@
 | Severity | Total | Fixed | Partial | Open |
 |----------|------:|------:|--------:|-----:|
 | 🔴 Critical | 5 | 5 | 0 | 0 |
-| 🟠 High | 8 | 3 | 1 | 4 |
+| 🟠 High | 9 | 3 | 1 | 5 |
 | 🟡 Medium | 10 | 0 | 0 | 10 |
 | 🔵 Low | 10 | 0 | 2 | 8 |
-| **Total** | **33** | **8** | **3** | **22** |
+| **Total** | **34** | **8** | **3** | **23** |
