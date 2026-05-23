@@ -76,7 +76,11 @@ impl Pipeline {
             tracing::info!("pipeline: hotkey released={released}");
             tokio::task::spawn_blocking(move || audio.stop()).await.ok();
             tracing::info!("pipeline: audio stopped");
-            if !released { asr.abort(); return; }
+            if !released {
+                asr.abort();
+                let _ = events.send(PipelineEvent::Error("Hotkey service disconnected.".into())).await;
+                break;
+            }
             if let Ok(e) = audio_err_rx.try_recv() {
                 let _ = events.send(PipelineEvent::Error(format!("Audio capture failed: {e}"))).await;
                 continue;
