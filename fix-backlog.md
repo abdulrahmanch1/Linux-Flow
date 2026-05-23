@@ -150,6 +150,26 @@
 
 ---
 
+### [H-08] Soniox error responses cause 30-second hang — confirmed in production logs
+- **File:** `app/src/asr.rs`
+- **Evidence:** Journald entries from `2026-05-21 20:48` and `20:51` show Soniox returning:
+  ```json
+  {"tokens":[],"error_code":402,"error_type":"organization_balance_exhausted","error_message":"Organization balance exhausted..."}
+  ```
+- **Problem:** `asr.rs` only checks for `"finished": true` to end the transcription loop. Error responses from Soniox do not include `"finished": true`, so the loop waits for the full `STREAM_TIMEOUT` (30 s) before returning. The pipeline then falls through to a generic error path with no user-visible message. Two confirmed 30-second hangs observed in production.
+- **Fix:**
+  After deserializing each incoming JSON frame, check for the presence of `error_code` before checking tokens:
+  ```rust
+  if let Some(code) = msg.error_code {
+      return Err(AsrError::ServerError { code, message: msg.error_message });
+  }
+  ```
+  Add an `error_code: Option<u32>` and `error_message: Option<String>` field to the ASR message struct.
+- **Note:** Also requires adding specific UI messages in `pipeline.rs` for known codes (see M-09).
+- [ ] **Status: Open**
+
+---
+
 ## 🟡 Medium — Quality and Incorrect Behaviour
 
 ### [M-01] `IpcRequest` derives `Clone` — dictation text can be silently copied
@@ -238,6 +258,35 @@
 
 ---
 
+### [M-09] Soniox 402 (balance exhausted) shows no user-visible message *(blocked on H-08)*
+- **File:** `app/src/pipeline.rs`
+- **Problem:** Even after fixing H-08, all Soniox server errors fall through to the same generic message. HTTP 402 (balance exhausted) needs a specific, actionable message so the user knows to top up their Soniox account. Confirmed cause of two silent failures on `2026-05-21`.
+- **Fix:**
+  ```rust
+  Err(AsrError::ServerError { code: 402, .. }) =>
+      "Soniox balance exhausted — add funds at soniox.com.",
+  Err(AsrError::ServerError { code, message }) =>
+      &format!("Soniox error {code}: {message}"),
+  ```
+- [ ] **Status: Open**
+
+---
+
+### [M-10] Helper crash loop creates orphaned uinput devices
+- **File:** `daemon/src/uinput.rs`, `system/linux-flow.service`
+- **Evidence:** Kernel log from `2026-05-23 17:28–17:29` shows 30 uinput devices registered in 60 seconds (`/devices/virtual/input/input19` → `input48`), one every `RestartSec=2` interval.
+- **Problem:** Each helper restart creates a new `/dev/input` virtual device. While the kernel releases the device when the fd is closed on process exit, a rapid crash loop floods the input device list and can exhaust kernel input slots. No `StartLimitBurst` is set in the service, so restarts are unbounded.
+- **Fix:**
+  (a) In `system/linux-flow.service`, add restart rate limiting:
+  ```ini
+  StartLimitIntervalSec=60
+  StartLimitBurst=5
+  ```
+  (b) Ensure `UinputDevice` implements `Drop` that explicitly closes the fd and calls `UI_DEV_DESTROY` ioctl before process exit.
+- [ ] **Status: Open**
+
+---
+
 ## 🔵 Low — Code Quality Improvements
 
 ### [L-01] SIGINT not handled — socket file left behind on Ctrl-C during debugging
@@ -313,12 +362,26 @@
 
 ---
 
+### [L-10] Helper stderr not forwarded to journald — crash root causes invisible
+- **File:** `system/linux-flow.service`
+- **Evidence:** The crash loop on `2026-05-23 17:28` produced zero stderr lines in journald. The helper writes all errors via `eprintln!` but the service has no `StandardError=journal` directive, so output goes to `/dev/null`.
+- **Problem:** When the helper crashes, the reason (socket bind failure, uinput error, IPC decode error) is permanently lost. Debugging requires attaching a terminal to the process, which is impractical for a background daemon.
+- **Fix:**
+  ```ini
+  [Service]
+  StandardOutput=journal
+  StandardError=journal
+  ```
+- [ ] **Status: Open**
+
+---
+
 ## Summary
 
 | Severity | Total | Fixed | Partial | Open |
 |----------|------:|------:|--------:|-----:|
 | 🔴 Critical | 5 | 5 | 0 | 0 |
-| 🟠 High | 7 | 3 | 1 | 3 |
-| 🟡 Medium | 8 | 0 | 0 | 8 |
-| 🔵 Low | 9 | 0 | 2 | 7 |
-| **Total** | **29** | **8** | **3** | **18** |
+| 🟠 High | 8 | 3 | 1 | 4 |
+| 🟡 Medium | 10 | 0 | 0 | 10 |
+| 🔵 Low | 10 | 0 | 2 | 8 |
+| **Total** | **33** | **8** | **3** | **22** |
