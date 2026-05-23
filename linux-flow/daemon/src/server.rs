@@ -98,10 +98,10 @@ async fn handle_connection(
             .map_err(|e| DaemonError::InjectionFailed(format!("blocking task: {e}")))?;
             match result {
                 Ok(()) => RESPONSE_OK,
-                Err(_) => RESPONSE_ERR,
+                Err(e) => { eprintln!("linux-flow-helper: injection failed: {e}"); RESPONSE_ERR }
             }
         }
-        Err(_) => RESPONSE_ERR,
+        Err(e) => { eprintln!("linux-flow-helper: ipc decode error: {e}"); RESPONSE_ERR }
     };
     payload.zeroize();
 
