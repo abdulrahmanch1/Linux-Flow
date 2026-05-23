@@ -80,7 +80,7 @@
   let listener = UnixListener::bind(&path)?;
   std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed**
 
 ---
 
@@ -89,7 +89,7 @@
 - **Code:** `stream.read_exact(&mut len_buf).await?;` — awaits forever
 - **Problem:** A process on the same UID can open many connections and send incomplete data, leaving tasks pending forever.
 - **Fix:** Wrap both `read_exact` calls with `tokio::time::timeout(Duration::from_secs(5), ...)`.
-- [ ] **Status: Open**
+- [x] **Status: Fixed**
 
 ---
 
@@ -104,7 +104,7 @@
       Err(e) => { tracing::error!("accept error: {e}"); continue; }
   };
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed**
 
 ---
 
@@ -318,7 +318,7 @@
 | Severity | Total | Fixed | Partial | Open |
 |----------|------:|------:|--------:|-----:|
 | 🔴 Critical | 5 | 5 | 0 | 0 |
-| 🟠 High | 7 | 0 | 1 | 6 |
+| 🟠 High | 7 | 3 | 1 | 3 |
 | 🟡 Medium | 8 | 0 | 0 | 8 |
 | 🔵 Low | 9 | 0 | 2 | 7 |
-| **Total** | **29** | **5** | **3** | **21** |
+| **Total** | **29** | **8** | **3** | **18** |

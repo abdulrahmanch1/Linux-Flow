@@ -1,5 +1,5 @@
 use std::{
-    os::unix::io::AsRawFd,
+    os::unix::{fs::PermissionsExt, io::AsRawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -10,6 +10,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
     sync::oneshot,
+    time,
 };
 
 use crate::error::DaemonError;
@@ -22,10 +23,7 @@ pub trait KeyInjector: Send + Sync {
 pub fn socket_path() -> Result<PathBuf, DaemonError> {
     // SAFETY: getuid() has no preconditions and always succeeds on Linux.
     let uid = unsafe { libc::getuid() };
-    Ok(PathBuf::from(format!(
-        "/run/user/{}/linux-flow-helper.sock",
-        uid
-    )))
+    Ok(PathBuf::from(format!("/run/user/{uid}/linux-flow-helper.sock")))
 }
 
 /// Removes a stale socket file from a previous run, ignoring NotFound.
@@ -80,11 +78,13 @@ async fn handle_connection(
     verify_peer(&stream, owner_uid)?;
 
     let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).await?;
+    time::timeout(std::time::Duration::from_secs(5), stream.read_exact(&mut len_buf)).await
+        .map_err(|_| DaemonError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "read timeout")))??;
     let payload_len = ipc_proto::parse_length(len_buf)?;
 
     let mut payload = vec![0u8; payload_len];
-    stream.read_exact(&mut payload).await?;
+    time::timeout(std::time::Duration::from_secs(5), stream.read_exact(&mut payload)).await
+        .map_err(|_| DaemonError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "read timeout")))??;
 
     let response = match ipc_proto::decode_frame(&payload) {
         Ok(IpcRequest::InjectText { mut text }) => {
@@ -116,6 +116,7 @@ pub async fn run_server(
     let path = socket_path()?;
     remove_stale_socket(&path).await?;
     let listener = UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(DaemonError::Io)?;
 
     // SAFETY: getuid() is always valid on Linux.
     let owner_uid = unsafe { libc::getuid() };
@@ -123,7 +124,10 @@ pub async fn run_server(
     loop {
         tokio::select! {
             result = listener.accept() => {
-                let (stream, _) = result?;
+                let (stream, _) = match result {
+                    Ok(s) => s,
+                    Err(e) => { eprintln!("linux-flow-helper: accept error: {e}"); continue; }
+                };
                 let inj = Arc::clone(&injector);
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream, owner_uid, inj).await {
