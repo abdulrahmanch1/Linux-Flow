@@ -67,7 +67,7 @@ impl UinputInjector {
             return Err(DaemonError::Io(std::io::Error::last_os_error()));
         }
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(20));
         Ok(Self {
             inner: Mutex::new(Inner { fd }),
             display: clipboard::detect_display(),

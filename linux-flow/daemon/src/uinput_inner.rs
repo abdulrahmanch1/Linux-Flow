@@ -121,7 +121,7 @@ impl Inner {
         if shift {
             self.key_event(keys::KEY_LEFTSHIFT, false)?;
         }
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_micros(500));
         Ok(())
     }
 

@@ -167,28 +167,28 @@
   - **Files:** `app/src/settings.rs`, `app/src/wizard_complete.rs`
   - **Verified:** `Config::load()` already returns `Ok(Self::default())` for a missing file (line 64–66 of `shared/src/config.rs`), so the `?` in wizard_complete only fires for real errors (permissions, corrupt TOML, no HOME). The `adw::Toast` path in settings is reachable via disk-full or permission-denied scenarios. ✓
 
-- [ ] **TASK-38** — Surface injection failures from daemon back to the user.
+- [x] **TASK-38** — Surface injection failures from daemon back to the user.
   - **Root cause:** `daemon/src/server.rs:129-131` — when `inject_text()` returns an error, it is logged to stderr only. The daemon writes `0x01` on failure (per protocol), but `app/src/inject.rs` does not read the response byte and treats every sent frame as success.
   - **Fix:** In `inject.rs`, after writing the framed payload, read 1 byte response: `0x00` → `Ok(())`, `0x01` or any read error → `Err(...)`. In `pipeline.rs`, the existing `inject_text` error path already sends `PipelineEvent::Error`, so no change needed there.
   - **Files:** `app/src/inject.rs`, `daemon/src/server.rs`
   - **Verified:** The daemon protocol already sends `0x00`/`0x01` per TASK-03. Only the app-side reader is missing. ✓
 
-- [ ] **TASK-39** — Zeroize Bearer Token string in LLM client.
+- [x] **TASK-39** — Zeroize Bearer Token string in LLM client.
   - **Root cause:** `llm.rs:114-120` — `format!("Bearer {}", *api_key)` allocates a plain `String` that is never zeroized; it lives in the reqwest header map until the response arrives. `pipeline.rs:67` clones `self.soniox_key` into the spawned task, creating a second live copy of the secret.
   - **Fix:** Wrap the `auth` string in `Zeroizing<String>`, pass it to reqwest as `reqwest::header::HeaderValue::from_str(&*auth)?`, then explicitly `auth.zeroize()` before awaiting the response. For `soniox_key`, share via `Arc<Zeroizing<String>>` instead of `clone()` so only one allocation exists.
   - **Files:** `app/src/llm.rs`, `app/src/pipeline.rs`
 
-- [ ] **TASK-40** — Validate `/proc/<pid>/stat` fields before passing to pkcheck.
+- [x] **TASK-40** — Validate `/proc/<pid>/stat` fields before passing to pkcheck.
   - **Root cause:** `wizard_polkit.rs:85,93` — `read_proc_start_time()` splits the stat line on whitespace and indexes field 22 without checking the field count. A truncated or adversarially crafted `/proc` entry silently returns an empty `start_time`, which is then passed to `pkcheck` without digit-only validation.
   - **Fix:** After splitting, assert `fields.len() >= 22` and return `Err` otherwise. After extracting `start_time`, reject with `Err` if it contains any non-digit character before constructing the `pkcheck` argument.
   - **Files:** `app/src/wizard_polkit.rs`
 
-- [ ] **TASK-41** — Fix race condition in hotkey deduplicator and non-atomic tray frame counter.
+- [x] **TASK-41** — Fix race condition in hotkey deduplicator and non-atomic tray frame counter.
   - **Root cause:** (a) `hotkey.rs:50-63` — three backend threads (`WaylandBackend`, `X11Backend`, `EvdevBackend`) all send into the same `raw_tx` `mpsc::Sender` concurrently. `mpsc::Sender` is safe to clone and share, but events from concurrent backends can interleave, causing a Pressed from one backend to pair with a Released from another. (b) `tray.rs:67-68` — `self.frame` is a plain `usize` mutated from the animation timer callback and read from the paint callback without synchronization.
   - **Fix:** (a) Add a deduplication lock: track the last-seen event per backend with an `Arc<Mutex<Option<HotkeyEvent>>>` so only the backend that sent Press can send the matching Release. (b) Change `self.frame` to `Arc<AtomicUsize>` and use `fetch_add` / `load(Ordering::Relaxed)`.
   - **Files:** `app/src/hotkey.rs`, `app/src/tray.rs`
 
-- [ ] **TASK-42** — Reduce fixed sleeps on the injection hot path.
+- [x] **TASK-42** — Reduce fixed sleeps on the injection hot path.
   - **Root cause:** (a) `daemon/uinput_inner.rs:124` — a hard-coded `sleep(1ms)` between every character adds 1ms × N characters of latency to the end-to-end pipeline, violating the <200ms injection budget for typical dictation lengths. (b) `daemon/uinput_inner.rs:142` — `clipboard_clear()` is called synchronously after the Ctrl+V key-up event, blocking the daemon response for the full clear duration. (c) `daemon/uinput.rs:70` — a hard-coded `sleep(100ms)` in device setup runs on every startup.
   - **Fix:** (a) Reduce inter-character sleep to the minimum required by the kernel uinput flush cycle (empirically 500µs; measure with `evtest` if needed). (b) Spawn `clipboard_clear()` in a detached `tokio::task::spawn_blocking` call so it runs after the response is sent. (c) Lower the device-ready sleep to 20ms and remove it entirely if the device opens cleanly without it.
   - **Files:** `daemon/src/uinput_inner.rs`, `daemon/src/uinput.rs`

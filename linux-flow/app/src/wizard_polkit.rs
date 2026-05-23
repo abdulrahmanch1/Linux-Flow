@@ -69,10 +69,14 @@ fn read_proc_start_time() -> Result<String, String> {
         .next()
         .ok_or("malformed /proc/self/stat")?;
     // starttime is field 22 (1-indexed) = index 19 after the closing ')'.
-    rest.split_whitespace()
+    let start_time = rest
+        .split_whitespace()
         .nth(19)
-        .map(str::to_owned)
-        .ok_or_else(|| "malformed /proc/self/stat".to_string())
+        .ok_or_else(|| "malformed /proc/self/stat".to_string())?;
+    if !start_time.chars().all(|c| c.is_ascii_digit()) {
+        return Err("malformed /proc/self/stat: start_time is not numeric".to_string());
+    }
+    Ok(start_time.to_owned())
 }
 
 fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button) {
