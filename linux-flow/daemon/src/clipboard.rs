@@ -47,6 +47,11 @@ fn pipe(cmd: &str, args: &[&str], text: &str) -> Result<(), DaemonError> {
         .ok_or_else(|| DaemonError::InjectionFailed(format!("{cmd}: no stdin")))?;
     stdin.write_all(text.as_bytes()).map_err(DaemonError::Io)?;
     drop(stdin);
-    child.wait().map_err(DaemonError::Io)?;
+    let status = child.wait().map_err(DaemonError::Io)?;
+    if !status.success() {
+        return Err(DaemonError::InjectionFailed(
+            format!("{cmd} exited with {:?}", status.code())
+        ));
+    }
     Ok(())
 }
