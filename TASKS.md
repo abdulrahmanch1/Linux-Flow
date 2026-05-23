@@ -153,3 +153,42 @@
   - **Fix:** Change `evdev_to_keysym()` to return `Option<c_ulong>`. The wildcard arm returns `None`. In `X11Backend::run()`, handle `None` with `evdev_to_keysym(hotkey).ok_or(HotkeyError::X11Keycode)?`. Update the `X11Keycode` error message to "configured hotkey is not supported on X11".
   - **Files:** `app/src/hotkey_x11.rs`, `app/src/hotkey.rs`
   - **Verified:** `XKeysymToKeycode` already catches keysym→keycode failures (returns 0, caught at line 45). This fix adds an earlier guard at the name-lookup stage so unknown keys are rejected before they silently become the wrong key. ✓
+
+---
+
+## Phase 15 — Bug Fixes (Audit Round 2)
+
+> Bugs discovered during a second full static audit after Phase 14 was complete.
+> Implement in order: TASK-37 → TASK-42.
+
+- [x] **TASK-37** — Fix silent settings save failures not surfacing to the user.
+  - **Root cause:** `settings.rs:84` — `patch_config()` wraps `cfg.save()` in `let _ = ...`, silently discarding any I/O or serialization error. The confirm button then calls `win.close()` unconditionally, so the user sees the window disappear and assumes settings were saved. `wizard_complete.rs:39` uses `Config::load().unwrap_or_default()`, silently replacing a corrupted or unreadable config file with defaults, discarding the user's existing configuration.
+  - **Fix:** (a) Change `patch_config()` to return `Result<(), String>` by removing `let _ =` and using `.map_err(|e| e.to_string())`. In `confirm_btn.connect_clicked`, wrap the call in `if let Err(e) = patch_config(...)` — on error, call `win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")))` and `return` without closing the window. (b) In `wizard_complete.rs:39`, change `Config::load().unwrap_or_default()` to `Config::load().map_err(|e| e.to_string())?` so a genuine config load failure surfaces to the status label via the existing error channel.
+  - **Files:** `app/src/settings.rs`, `app/src/wizard_complete.rs`
+  - **Verified:** `Config::load()` already returns `Ok(Self::default())` for a missing file (line 64–66 of `shared/src/config.rs`), so the `?` in wizard_complete only fires for real errors (permissions, corrupt TOML, no HOME). The `adw::Toast` path in settings is reachable via disk-full or permission-denied scenarios. ✓
+
+- [ ] **TASK-38** — Surface injection failures from daemon back to the user.
+  - **Root cause:** `daemon/src/server.rs:129-131` — when `inject_text()` returns an error, it is logged to stderr only. The daemon writes `0x01` on failure (per protocol), but `app/src/inject.rs` does not read the response byte and treats every sent frame as success.
+  - **Fix:** In `inject.rs`, after writing the framed payload, read 1 byte response: `0x00` → `Ok(())`, `0x01` or any read error → `Err(...)`. In `pipeline.rs`, the existing `inject_text` error path already sends `PipelineEvent::Error`, so no change needed there.
+  - **Files:** `app/src/inject.rs`, `daemon/src/server.rs`
+  - **Verified:** The daemon protocol already sends `0x00`/`0x01` per TASK-03. Only the app-side reader is missing. ✓
+
+- [ ] **TASK-39** — Zeroize Bearer Token string in LLM client.
+  - **Root cause:** `llm.rs:114-120` — `format!("Bearer {}", *api_key)` allocates a plain `String` that is never zeroized; it lives in the reqwest header map until the response arrives. `pipeline.rs:67` clones `self.soniox_key` into the spawned task, creating a second live copy of the secret.
+  - **Fix:** Wrap the `auth` string in `Zeroizing<String>`, pass it to reqwest as `reqwest::header::HeaderValue::from_str(&*auth)?`, then explicitly `auth.zeroize()` before awaiting the response. For `soniox_key`, share via `Arc<Zeroizing<String>>` instead of `clone()` so only one allocation exists.
+  - **Files:** `app/src/llm.rs`, `app/src/pipeline.rs`
+
+- [ ] **TASK-40** — Validate `/proc/<pid>/stat` fields before passing to pkcheck.
+  - **Root cause:** `wizard_polkit.rs:85,93` — `read_proc_start_time()` splits the stat line on whitespace and indexes field 22 without checking the field count. A truncated or adversarially crafted `/proc` entry silently returns an empty `start_time`, which is then passed to `pkcheck` without digit-only validation.
+  - **Fix:** After splitting, assert `fields.len() >= 22` and return `Err` otherwise. After extracting `start_time`, reject with `Err` if it contains any non-digit character before constructing the `pkcheck` argument.
+  - **Files:** `app/src/wizard_polkit.rs`
+
+- [ ] **TASK-41** — Fix race condition in hotkey deduplicator and non-atomic tray frame counter.
+  - **Root cause:** (a) `hotkey.rs:50-63` — three backend threads (`WaylandBackend`, `X11Backend`, `EvdevBackend`) all send into the same `raw_tx` `mpsc::Sender` concurrently. `mpsc::Sender` is safe to clone and share, but events from concurrent backends can interleave, causing a Pressed from one backend to pair with a Released from another. (b) `tray.rs:67-68` — `self.frame` is a plain `usize` mutated from the animation timer callback and read from the paint callback without synchronization.
+  - **Fix:** (a) Add a deduplication lock: track the last-seen event per backend with an `Arc<Mutex<Option<HotkeyEvent>>>` so only the backend that sent Press can send the matching Release. (b) Change `self.frame` to `Arc<AtomicUsize>` and use `fetch_add` / `load(Ordering::Relaxed)`.
+  - **Files:** `app/src/hotkey.rs`, `app/src/tray.rs`
+
+- [ ] **TASK-42** — Reduce fixed sleeps on the injection hot path.
+  - **Root cause:** (a) `daemon/uinput_inner.rs:124` — a hard-coded `sleep(1ms)` between every character adds 1ms × N characters of latency to the end-to-end pipeline, violating the <200ms injection budget for typical dictation lengths. (b) `daemon/uinput_inner.rs:142` — `clipboard_clear()` is called synchronously after the Ctrl+V key-up event, blocking the daemon response for the full clear duration. (c) `daemon/uinput.rs:70` — a hard-coded `sleep(100ms)` in device setup runs on every startup.
+  - **Fix:** (a) Reduce inter-character sleep to the minimum required by the kernel uinput flush cycle (empirically 500µs; measure with `evtest` if needed). (b) Spawn `clipboard_clear()` in a detached `tokio::task::spawn_blocking` call so it runs after the response is sent. (c) Lower the device-ready sleep to 20ms and remove it entirely if the device opens cleanly without it.
+  - **Files:** `daemon/src/uinput_inner.rs`, `daemon/src/uinput.rs`

@@ -59,14 +59,17 @@ pub fn build_settings() -> adw::PreferencesWindow {
     confirm_btn.connect_clicked({
         let win = window.clone();
         move |_| {
-            patch_config(|c| {
+            if let Err(e) = patch_config(|c| {
                 let v = hotkey_row.text().to_string();
                 if !v.is_empty() { c.general.hotkey = v; }
                 let v = lang_row.text().to_string();
                 if !v.is_empty() { c.soniox.language = v; }
                 let v = model_row.text().to_string();
                 if !v.is_empty() { c.llm.model = v; }
-            });
+            }) {
+                win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
+                return;
+            }
             let soniox_v = Zeroizing::new(soniox_key_row.text().to_string());
             if !soniox_v.is_empty() { spawn_save_key("soniox", soniox_v); }
             let or_v = Zeroizing::new(openrouter_key_row.text().to_string());
@@ -78,10 +81,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     window
 }
 
-fn patch_config(update: impl FnOnce(&mut Config)) {
+fn patch_config(update: impl FnOnce(&mut Config)) -> Result<(), String> {
     let mut cfg = Config::load().unwrap_or_default();
     update(&mut cfg);
-    let _ = cfg.save();
+    cfg.save().map_err(|e| e.to_string())
 }
 
 fn spawn_save_key(service: &'static str, value: Zeroizing<String>) {
