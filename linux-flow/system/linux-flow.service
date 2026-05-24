@@ -1,6 +1,8 @@
 [Unit]
 Description=linux-flow Privileged Input Helper
 After=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -8,8 +10,6 @@ ExecStart=/usr/local/lib/linux-flow/linux-flow-helper
 PassEnvironment=WAYLAND_DISPLAY DISPLAY
 Restart=on-failure
 RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 
