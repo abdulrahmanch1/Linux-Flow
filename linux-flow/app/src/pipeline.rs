@@ -203,6 +203,15 @@ impl Pipeline {
                 }
             };
             raw.zeroize();
+            if text.trim().is_empty() {
+                let _ = events
+                    .send(PipelineEvent::Error(
+                        "No speech detected. Try speaking more clearly.".into(),
+                    ))
+                    .await;
+                text.zeroize();
+                continue;
+            }
             if fallback {
                 let _ = events.send(PipelineEvent::LlmFallback).await;
             }

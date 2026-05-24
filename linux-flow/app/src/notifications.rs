@@ -46,7 +46,7 @@ pub async fn handle_events(
 }
 
 async fn notify_desktop(body: &str) {
-    let _ = tokio::process::Command::new("notify-send")
+    let ok = tokio::process::Command::new("notify-send")
         .args([
             "--app-name=linux-flow",
             "--icon=dialog-warning",
@@ -54,5 +54,10 @@ async fn notify_desktop(body: &str) {
             body,
         ])
         .status()
-        .await;
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        eprintln!("linux-flow: {body}");
+    }
 }

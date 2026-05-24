@@ -125,7 +125,14 @@ impl Inner {
         // it without going through the XKB layer, so it works with any keyboard layout.
         self.key_event(keys::KEY_PASTE, true)?;
         self.key_event(keys::KEY_PASTE, false)?;
-        clipboard::clipboard_clear(display);
+        // Clear the clipboard in a background thread after a delay. Calling
+        // clipboard_clear immediately races against the compositor: KEY_PASTE is
+        // only queued in the kernel at this point, so clearing before the focused
+        // app processes the event causes it to paste empty content.
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            clipboard::clipboard_clear(display);
+        });
         Ok(())
     }
 }
