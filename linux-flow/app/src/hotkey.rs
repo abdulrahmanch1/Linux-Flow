@@ -33,6 +33,8 @@ pub enum HotkeyError {
     SetupTimeout,
     #[error("configured hotkey has no evdev device or is not supported")]
     EvdevUnsupported,
+    #[error("XGrabKey failed: key is already grabbed by another process")]
+    X11GrabFailed,
 }
 
 pub struct HotkeyManager {

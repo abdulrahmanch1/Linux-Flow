@@ -1,11 +1,23 @@
 use std::os::raw::c_int;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc;
 use x11::xlib::{
     AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask, XCloseDisplay,
-    XDefaultRootWindow, XEvent, XGrabKey, XNextEvent, XOpenDisplay, XSelectInput, XUngrabKey,
+    XDefaultRootWindow, XErrorEvent, XEvent, XGrabKey, XNextEvent, XOpenDisplay, XSelectInput,
+    XSetErrorHandler, XSync, XUngrabKey,
 };
+
+static XGRAB_FAILED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "C" fn xlib_error_handler(
+    _display: *mut x11::xlib::Display,
+    _event: *mut XErrorEvent,
+) -> c_int {
+    XGRAB_FAILED.store(true, Ordering::SeqCst);
+    0
+}
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
 
@@ -43,6 +55,11 @@ impl X11Backend {
         let root = unsafe { XDefaultRootWindow(display) };
         let keycode = evdev_name_to_x11_keycode(hotkey).ok_or(HotkeyError::X11Keycode)?;
 
+        // Install a non-fatal error handler so BadAccess from XGrabKey does not
+        // call exit() via Xlib's default handler and kill the whole process.
+        XGRAB_FAILED.store(false, Ordering::SeqCst);
+        unsafe { XSetErrorHandler(Some(xlib_error_handler)) };
+
         unsafe {
             XSelectInput(display, root, KeyPressMask | KeyReleaseMask);
             XGrabKey(
@@ -50,10 +67,16 @@ impl X11Backend {
                 keycode as c_int,
                 AnyModifier,
                 root,
-                0, // owner_events = False: deliver events to grab window
+                0, // owner_events = False
                 GrabModeAsync,
                 GrabModeAsync,
             );
+            XSync(display, 0); // flush so any BadAccess error is delivered now
+        }
+
+        if XGRAB_FAILED.load(Ordering::SeqCst) {
+            unsafe { XCloseDisplay(display) };
+            return Err(crate::hotkey::HotkeyError::X11GrabFailed);
         }
 
         let result = Self::event_loop(display, keycode, &tx);
