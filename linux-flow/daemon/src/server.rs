@@ -28,11 +28,22 @@ pub fn socket_path() -> Result<PathBuf, DaemonError> {
     )))
 }
 
-/// Removes a stale socket file from a previous run, ignoring NotFound.
-async fn remove_stale_socket(path: &Path) -> Result<(), DaemonError> {
+/// Ensures the socket path is free for a new bind.
+///
+/// First attempts to connect to any existing socket. A successful connection
+/// means a live daemon is already running — returns `DaemonError::AlreadyRunning`
+/// so the caller can exit cleanly without restarting. A failed connection means
+/// the file is stale; it is removed so `UnixListener::bind` can succeed.
+async fn check_or_remove_socket(path: &Path) -> Result<(), DaemonError> {
+    use std::io::ErrorKind;
+    match tokio::net::UnixStream::connect(path).await {
+        Ok(_) => return Err(DaemonError::AlreadyRunning),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(_) => {} // ECONNREFUSED or similar — stale socket, fall through
+    }
     match tokio::fs::remove_file(path).await {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(DaemonError::Io(e)),
     }
 }
@@ -140,7 +151,7 @@ pub async fn run_server(
     injector: Arc<dyn KeyInjector>,
 ) -> Result<(), DaemonError> {
     let path = socket_path()?;
-    remove_stale_socket(&path).await?;
+    check_or_remove_socket(&path).await?;
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         .map_err(DaemonError::Io)?;

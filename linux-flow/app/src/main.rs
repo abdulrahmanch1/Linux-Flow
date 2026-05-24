@@ -34,7 +34,31 @@ enum AppError {
     Pipeline(#[from] pipeline::PipelineError),
 }
 
+/// Returns an open File that holds an exclusive flock for the duration of the
+/// process, or None if another instance already holds it.
+fn acquire_instance_lock() -> Option<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: getuid() always succeeds on Linux.
+    let uid = unsafe { libc::getuid() };
+    let path = format!("/run/user/{uid}/linux-flow.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(path)
+        .ok()?;
+    // SAFETY: fd is valid; LOCK_EX|LOCK_NB is a valid flock(2) combination.
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if ret == 0 { Some(file) } else { None }
+}
+
 fn main() -> ExitCode {
+    let _lock = match acquire_instance_lock() {
+        Some(f) => f,
+        None => {
+            eprintln!("linux-flow: already running — exiting");
+            return ExitCode::SUCCESS;
+        }
+    };
     let debug = std::env::args().any(|a| a == "--debug");
     init_tracing(debug);
     if adw::init().is_err() {

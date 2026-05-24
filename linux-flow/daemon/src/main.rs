@@ -34,5 +34,11 @@ async fn main() -> Result<(), error::DaemonError> {
         }
     };
 
-    server::run_server(shutdown_rx, injector).await
+    match server::run_server(shutdown_rx, injector).await {
+        Err(error::DaemonError::AlreadyRunning) => {
+            eprintln!("linux-flow-helper: already running — exiting");
+            Ok(())
+        }
+        r => r,
+    }
 }

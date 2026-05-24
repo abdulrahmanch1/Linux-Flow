@@ -16,4 +16,7 @@ pub enum DaemonError {
 
     #[error("injection failed: {0}")]
     InjectionFailed(String),
+
+    #[error("daemon is already running")]
+    AlreadyRunning,
 }
