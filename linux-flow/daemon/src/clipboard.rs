@@ -11,34 +11,17 @@ pub fn detect_display() -> DisplayServer {
 }
 
 /// Writes `text` to the system clipboard using the appropriate tool.
+///
+/// Blocks until the clipboard tool exits. On compositors with a built-in
+/// clipboard manager (e.g. COSMIC) the manager takes ownership immediately
+/// and wl-copy exits. After this call returns, the data is in the manager
+/// and the subsequent Ctrl+V will paste it reliably without a race condition.
 pub fn clipboard_write(display: DisplayServer, text: &str) -> Result<(), DaemonError> {
     match display {
-        DisplayServer::Wayland => wayland_write(text),
+        DisplayServer::Wayland => pipe("wl-copy", &[], text),
         DisplayServer::X11 => pipe("xclip", &["-selection", "clipboard"], text),
         DisplayServer::Unknown => Err(DaemonError::InjectionFailed("no display server".into())),
     }
-}
-
-/// Spawns wl-copy with --paste-once and returns immediately.
-///
-/// --paste-once keeps wl-copy alive as the clipboard owner until one client
-/// requests the data, then it exits. We must NOT block on child.wait() here
-/// because wl-copy only exits after the paste (Ctrl+V) is consumed.
-fn wayland_write(text: &str) -> Result<(), DaemonError> {
-    let mut child = Command::new("wl-copy")
-        .arg("--paste-once")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| DaemonError::InjectionFailed(format!("wl-copy: {e}")))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| DaemonError::InjectionFailed("wl-copy: no stdin".into()))?;
-    stdin.write_all(text.as_bytes()).map_err(DaemonError::Io)?;
-    drop(stdin);
-    // wl-copy runs in the background; clipboard_clear (called after injection)
-    // evicts it if no paste arrives within the cleanup window.
-    Ok(())
 }
 
 /// Clears the system clipboard immediately after injection.
