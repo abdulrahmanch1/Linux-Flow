@@ -8,12 +8,34 @@ LIB_DIR="$PREFIX/lib/linux-flow"
 SYSTEMD_USER="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 _TMPDIR=""
 _GROUPS_CHANGED=0
+_INSTALLED_FILES=()
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found — please install it first"; }
 info() { printf '=> %s\n' "$*"; }
+
+# ── rollback ──────────────────────────────────────────────────────────────────
+
+_rollback() {
+    local exit_code=$?
+    [[ $exit_code -eq 0 ]] && return
+    printf '\nerror: installation failed — rolling back installed files...\n' >&2
+    for f in "${_INSTALLED_FILES[@]}"; do
+        [[ -e "$f" ]] && sudo rm -f "$f" 2>/dev/null || true
+    done
+    sudo rmdir --ignore-fail-on-non-empty "$LIB_DIR" 2>/dev/null || true
+    systemctl --user disable linux-flow.service 2>/dev/null || true
+    [[ -n "$_TMPDIR" ]] && rm -rf "$_TMPDIR"
+    printf 'Rollback complete. Your system is unchanged.\n' >&2
+}
+trap '_rollback' EXIT
+
+track() {
+    # track <dest> — record a successfully installed file for rollback
+    _INSTALLED_FILES+=("$1")
+}
 
 # ── source location ───────────────────────────────────────────────────────────
 
@@ -28,7 +50,6 @@ find_src() {
     fi
     need git
     _TMPDIR=$(mktemp -d)
-    trap 'rm -rf "$_TMPDIR"' EXIT
     info "Cloning linux-flow..."
     git clone --depth 1 "$REPO_URL" "$_TMPDIR/src" >/dev/null
     echo "$_TMPDIR/src"
@@ -39,8 +60,18 @@ find_src() {
 build() {
     local src="$1"
     need cargo
-    info "Building (this may take a few minutes)..."
-    (cd "$src" && cargo build --release --quiet)
+    # Use half the available cores so the build doesn't freeze the system.
+    local jobs
+    jobs=$(( $(nproc) / 2 ))
+    jobs=$(( jobs < 1 ? 1 : jobs ))
+    info "Building with $jobs/$( nproc) cores (this may take 5–10 minutes on first build)..."
+    local t0
+    t0=$(date +%s)
+    (cd "$src" && CARGO_BUILD_JOBS="$jobs" cargo build --release)
+    local elapsed=$(( $(date +%s) - t0 ))
+    info "Build finished in ${elapsed}s."
+    [[ -x "$src/target/release/linux-flow" ]]        || die "build output missing: linux-flow"
+    [[ -x "$src/target/release/linux-flow-helper" ]] || die "build output missing: linux-flow-helper"
 }
 
 # ── install ───────────────────────────────────────────────────────────────────
@@ -49,11 +80,19 @@ install_files() {
     local src="$1"
     info "Installing binaries..."
     sudo install -Dm755 "$src/target/release/linux-flow"        "$PREFIX/bin/linux-flow"
+    track "$PREFIX/bin/linux-flow"
     sudo install -Dm755 "$src/target/release/linux-flow-helper" "$LIB_DIR/linux-flow-helper"
+    track "$LIB_DIR/linux-flow-helper"
 
     info "Installing system files..."
+    sudo install -Dm644 "$src/system/50-linux-flow.rules"        /etc/polkit-1/rules.d/50-linux-flow.rules
+    track "/etc/polkit-1/rules.d/50-linux-flow.rules"
+    sudo install -Dm644 "$src/system/org.linux-flow.policy"      /usr/share/polkit-1/actions/org.linux-flow.policy
+    track "/usr/share/polkit-1/actions/org.linux-flow.policy"
     sudo install -Dm644 "$src/system/60-linux-flow-uinput.rules" /etc/udev/rules.d/60-linux-flow-uinput.rules
+    track "/etc/udev/rules.d/60-linux-flow-uinput.rules"
     sudo install -Dm644 "$src/system/linux-flow.desktop"         /usr/share/applications/linux-flow.desktop
+    track "/usr/share/applications/linux-flow.desktop"
     install     -Dm644 "$src/system/linux-flow.desktop"         "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/linux-flow.desktop"
     install     -Dm644 "$src/system/linux-flow.service"         "$SYSTEMD_USER/linux-flow.service"
 }
@@ -129,6 +168,26 @@ ensure_build_deps() {
     fi
 }
 
+# ── service start ─────────────────────────────────────────────────────────────
+
+start_service() {
+    systemctl --user daemon-reload
+    systemctl --user enable linux-flow.service
+
+    # Only start now if uinput group is active in the current login session.
+    # If not active (group was just added, or user hasn't logged out yet),
+    # linux-flow-helper would fail to open /dev/uinput and crash-loop every 2s.
+    local uinput_gid
+    uinput_gid=$(getent group uinput 2>/dev/null | cut -d: -f3)
+    if [[ -n "$uinput_gid" ]] && id -G | tr ' ' '\n' | grep -qx "$uinput_gid"; then
+        info "Starting linux-flow service..."
+        systemctl --user start linux-flow.service
+    else
+        info "Service enabled. It will start automatically on your next login."
+        [[ $_GROUPS_CHANGED -eq 1 ]] && info "Group membership updated — please log out and back in."
+    fi
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 main() {
@@ -143,6 +202,9 @@ main() {
         [[ "${answer,,}" != "y" ]] && { info "Aborted."; exit 0; }
         info "Stopping linux-flow service..."
         systemctl --user stop linux-flow.service 2>/dev/null || true
+        pkill -TERM -x linux-flow        2>/dev/null || true
+        pkill -TERM -x linux-flow-helper 2>/dev/null || true
+        sleep 1
     fi
 
     ensure_tools
@@ -153,15 +215,14 @@ main() {
     build "$src"
     install_files "$src"
     setup_uinput
+    start_service
 
-    systemctl --user daemon-reload
-    systemctl --user enable linux-flow.service
-    if [[ $_GROUPS_CHANGED -eq 0 ]]; then
-        info "Starting linux-flow service..."
-        systemctl --user start linux-flow.service
-    fi
+    # Disarm rollback — installation succeeded.
+    trap - EXIT
+    [[ -n "$_TMPDIR" ]] && rm -rf "$_TMPDIR"
 
     info "linux-flow installed successfully."
+    update-desktop-database --quiet /usr/share/applications 2>/dev/null || true
 }
 
 main "$@"
