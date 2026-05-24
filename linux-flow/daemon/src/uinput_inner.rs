@@ -119,18 +119,21 @@ impl Inner {
         display: DisplayServer,
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text)?;
-        // Give the compositor time to register the new clipboard contents before paste.
-        thread::sleep(Duration::from_millis(20));
-        // KEY_PASTE is a layout-independent paste key (0x161); the compositor handles
-        // it without going through the XKB layer, so it works with any keyboard layout.
-        self.key_event(keys::KEY_PASTE, true)?;
-        self.key_event(keys::KEY_PASTE, false)?;
-        // Clear the clipboard in a background thread after a delay. Calling
-        // clipboard_clear immediately races against the compositor: KEY_PASTE is
-        // only queued in the kernel at this point, so clearing before the focused
-        // app processes the event causes it to paste empty content.
+        // Wait for wl-copy to connect to the Wayland display and register as
+        // clipboard owner before we send the paste shortcut.
+        thread::sleep(Duration::from_millis(50));
+        // Ctrl+V is universally handled by compositors and toolkits. KEY_PASTE
+        // (XF86Paste) is layout-independent but many compositors do not forward
+        // it to focused windows, causing a silent no-op. Ctrl+V is reliable.
+        self.key_event(keys::KEY_LEFTCTRL, true)?;
+        self.key_event(keys::KEY_V, true)?;
+        self.key_event(keys::KEY_V, false)?;
+        self.key_event(keys::KEY_LEFTCTRL, false)?;
+        // Clear the clipboard after a delay long enough for the paste to be
+        // consumed. With --paste-once wl-copy exits on its own after one paste;
+        // the clear here handles the case where no paste ever arrives.
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(Duration::from_millis(500));
             clipboard::clipboard_clear(display);
         });
         Ok(())

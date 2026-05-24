@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=linux-flow
 Comment=Push-to-talk dictation for Linux
-Exec=/usr/local/bin/linux-flow
+Exec=env GSK_RENDERER=cairo /usr/local/bin/linux-flow
 Icon=audio-input-microphone
 Terminal=false
 Type=Application
