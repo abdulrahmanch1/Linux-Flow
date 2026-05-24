@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+    "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+    "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>linux-flow</vendor>
+  <vendor_url>https://github.com/Abdulrahmanch1/linux-flow</vendor_url>
+
+  <action id="org.linux-flow.helper.manage">
+    <description>Manage the linux-flow privileged input helper</description>
+    <message>Authentication is required to authorize linux-flow to inject keystrokes</message>
+    <icon_name>audio-input-microphone</icon_name>
+    <defaults>
+      <!-- Remote sessions always require admin credentials -->
+      <allow_any>auth_admin</allow_any>
+      <!-- Inactive local sessions require admin credentials -->
+      <allow_inactive>auth_admin</allow_inactive>
+      <!-- Active local sessions: grant without password prompt -->
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

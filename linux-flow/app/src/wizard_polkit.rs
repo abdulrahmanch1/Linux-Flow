@@ -5,7 +5,7 @@ use libadwaita as adw;
 
 use crate::wizard::WizardState;
 
-const POLKIT_ACTION: &str = "org.freedesktop.policykit.exec";
+const POLKIT_ACTION: &str = "org.linux-flow.helper.manage";
 
 pub(crate) fn page_polkit(
     state: Rc<RefCell<WizardState>>,

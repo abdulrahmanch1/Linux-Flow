@@ -192,3 +192,13 @@
   - **Root cause:** (a) `daemon/uinput_inner.rs:124` — a hard-coded `sleep(1ms)` between every character adds 1ms × N characters of latency to the end-to-end pipeline, violating the <200ms injection budget for typical dictation lengths. (b) `daemon/uinput_inner.rs:142` — `clipboard_clear()` is called synchronously after the Ctrl+V key-up event, blocking the daemon response for the full clear duration. (c) `daemon/uinput.rs:70` — a hard-coded `sleep(100ms)` in device setup runs on every startup.
   - **Fix:** (a) Reduce inter-character sleep to the minimum required by the kernel uinput flush cycle (empirically 500µs; measure with `evtest` if needed). (b) Spawn `clipboard_clear()` in a detached `tokio::task::spawn_blocking` call so it runs after the response is sent. (c) Lower the device-ready sleep to 20ms and remove it entirely if the device opens cleanly without it.
   - **Files:** `daemon/src/uinput_inner.rs`, `daemon/src/uinput.rs`
+
+---
+
+## Phase 16 — Distribution & Wizard Fix
+
+- [x] **TASK-43** — Fix broken polkit wizard step and missing system files.
+  - **Root cause:** `wizard_polkit.rs` uses `org.freedesktop.policykit.exec` as the polkit action ID. This action grants passwordless `pkexec` (run any program as root) to every `uinput` group member — a critical security hole — so the rules file was deleted. Without it, `pkcheck` always returns "authorization denied", the "Finish" button stays disabled, and the wizard cannot be completed. The app is non-functional after install.
+  - **Fix:** (a) Create `system/org.linux-flow.policy` — defines custom action `org.linux-flow.helper.manage` with `allow_active=yes` (no password for local active sessions). (b) Create `system/50-linux-flow.rules` — grants `org.linux-flow.helper.manage` to local active users. (c) Change `POLKIT_ACTION` in `wizard_polkit.rs` from `"org.freedesktop.policykit.exec"` to `"org.linux-flow.helper.manage"`. (d) Add installation of both new files in `install.sh`. (e) Add removal of the policy file in `uninstall.sh`.
+  - **Files:** `system/org.linux-flow.policy` (new), `system/50-linux-flow.rules` (new), `app/src/wizard_polkit.rs`, `linux-flow/install.sh`, `linux-flow/uninstall.sh`
+  - **Verified:** After fix, `pkcheck --action-id org.linux-flow.helper.manage` returns 0 for local active users → "Finish" button enables → wizard completes. The new action only authorizes linux-flow's own operation, not arbitrary root execution. ✓
