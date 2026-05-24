@@ -9,7 +9,10 @@ use crate::wizard_hotkey::gdk_to_evdev;
 async fn bind_portal() -> Result<(), String> {
     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
     let shortcuts = GlobalShortcuts::new().await.map_err(|e| e.to_string())?;
-    let session = shortcuts.create_session().await.map_err(|e| e.to_string())?;
+    let session = shortcuts
+        .create_session()
+        .await
+        .map_err(|e| e.to_string())?;
     shortcuts
         .bind_shortcuts(
             &session,
@@ -65,9 +68,18 @@ pub(crate) fn page_wayland(
     }
     capture.add_controller(key_ctrl);
 
-    next.connect_clicked(glib::clone!(#[weak] nav, #[strong] state, move |_| {
-        nav.push(&crate::wizard_polkit::page_polkit(Rc::clone(&state), nav.clone()));
-    }));
+    next.connect_clicked(glib::clone!(
+        #[weak]
+        nav,
+        #[strong]
+        state,
+        move |_| {
+            nav.push(&crate::wizard_polkit::page_polkit(
+                Rc::clone(&state),
+                nav.clone(),
+            ));
+        }
+    ));
 
     grant.connect_clicked(glib::clone!(
         #[weak] status, #[weak] next, #[weak] grant, #[weak] capture,

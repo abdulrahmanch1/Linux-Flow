@@ -1,13 +1,27 @@
 use pipewire::{
-    context::Context, main_loop::MainLoop, properties::properties, spa,
+    context::Context,
+    main_loop::MainLoop,
+    properties::properties,
+    spa,
     spa::{
-        param::{audio::AudioFormat, format::{FormatProperties, MediaSubtype, MediaType}, ParamType},
+        param::{
+            audio::AudioFormat,
+            format::{FormatProperties, MediaSubtype, MediaType},
+            ParamType,
+        },
         pod::{serialize::PodSerializer, Object, Property, PropertyFlags, Value},
         utils::{Id, SpaTypes},
     },
     stream::{Stream, StreamFlags},
 };
-use std::{rc::Rc, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread};
+use std::{
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -29,13 +43,22 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     pub fn new() -> Self {
-        Self { stop_flag: Arc::new(AtomicBool::new(false)), thread: None }
+        Self {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        }
     }
 
     pub fn start(
         &mut self,
-    ) -> Result<(mpsc::Receiver<Vec<u8>>, std::sync::mpsc::Receiver<AudioError>), AudioError> {
-        self.stop_flag.store(false, Ordering::Relaxed);
+    ) -> Result<
+        (
+            mpsc::Receiver<Vec<u8>>,
+            std::sync::mpsc::Receiver<AudioError>,
+        ),
+        AudioError,
+    > {
+        self.stop_flag.store(false, Ordering::Release);
         let stop = Arc::clone(&self.stop_flag);
         let (pcm_tx, pcm_rx) = mpsc::channel(512);
         let (err_tx, err_rx) = std::sync::mpsc::channel::<AudioError>();
@@ -49,7 +72,7 @@ impl AudioCapture {
     }
 
     pub fn stop(&mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_flag.store(true, Ordering::Release);
         if let Some(h) = self.thread.take() {
             let _ = h.join();
         }
@@ -61,11 +84,31 @@ fn audio_params_pod() -> Result<Vec<u8>, AudioError> {
         type_: SpaTypes::ObjectParamFormat.as_raw(),
         id: ParamType::EnumFormat.as_raw(),
         properties: vec![
-            Property { key: FormatProperties::MediaType.as_raw(), flags: PropertyFlags::empty(), value: Value::Id(Id(MediaType::Audio.as_raw())) },
-            Property { key: FormatProperties::MediaSubtype.as_raw(), flags: PropertyFlags::empty(), value: Value::Id(Id(MediaSubtype::Raw.as_raw())) },
-            Property { key: FormatProperties::AudioFormat.as_raw(), flags: PropertyFlags::empty(), value: Value::Id(Id(AudioFormat::S16LE.as_raw())) },
-            Property { key: FormatProperties::AudioRate.as_raw(), flags: PropertyFlags::empty(), value: Value::Int(SAMPLE_RATE) },
-            Property { key: FormatProperties::AudioChannels.as_raw(), flags: PropertyFlags::empty(), value: Value::Int(CHANNELS) },
+            Property {
+                key: FormatProperties::MediaType.as_raw(),
+                flags: PropertyFlags::empty(),
+                value: Value::Id(Id(MediaType::Audio.as_raw())),
+            },
+            Property {
+                key: FormatProperties::MediaSubtype.as_raw(),
+                flags: PropertyFlags::empty(),
+                value: Value::Id(Id(MediaSubtype::Raw.as_raw())),
+            },
+            Property {
+                key: FormatProperties::AudioFormat.as_raw(),
+                flags: PropertyFlags::empty(),
+                value: Value::Id(Id(AudioFormat::S16LE.as_raw())),
+            },
+            Property {
+                key: FormatProperties::AudioRate.as_raw(),
+                flags: PropertyFlags::empty(),
+                value: Value::Int(SAMPLE_RATE),
+            },
+            Property {
+                key: FormatProperties::AudioChannels.as_raw(),
+                flags: PropertyFlags::empty(),
+                value: Value::Int(CHANNELS),
+            },
         ],
     });
     let (w, _) = PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &obj)
@@ -73,10 +116,7 @@ fn audio_params_pod() -> Result<Vec<u8>, AudioError> {
     Ok(w.into_inner())
 }
 
-fn capture_loop(
-    pcm_tx: mpsc::Sender<Vec<u8>>,
-    stop: Arc<AtomicBool>,
-) -> Result<(), AudioError> {
+fn capture_loop(pcm_tx: mpsc::Sender<Vec<u8>>, stop: Arc<AtomicBool>) -> Result<(), AudioError> {
     pipewire::init();
     let mainloop = Rc::new(MainLoop::new(None)?);
     let context = Context::new(&*mainloop)?;
@@ -94,7 +134,7 @@ fn capture_loop(
     let _listener = stream
         .add_local_listener_with_user_data((pcm_tx, stop, ml))
         .process(|stream, (tx, stop, ml)| {
-            if stop.load(Ordering::Relaxed) {
+            if stop.load(Ordering::Acquire) {
                 ml.quit();
                 return;
             }

@@ -6,21 +6,23 @@ use crate::hotkey::{HotkeyError, HotkeyEvent};
 
 fn name_to_key(name: &str) -> Option<Key> {
     match name {
-        "KEY_RIGHTCTRL"  => Some(Key::KEY_RIGHTCTRL),
-        "KEY_LEFTCTRL"   => Some(Key::KEY_LEFTCTRL),
-        "KEY_RIGHTALT"   => Some(Key::KEY_RIGHTALT),
-        "KEY_LEFTALT"    => Some(Key::KEY_LEFTALT),
-        "KEY_RIGHTMETA"  => Some(Key::KEY_RIGHTMETA),
-        "KEY_LEFTMETA"   => Some(Key::KEY_LEFTMETA),
-        "KEY_CAPSLOCK"   => Some(Key::KEY_CAPSLOCK),
+        "KEY_RIGHTCTRL" => Some(Key::KEY_RIGHTCTRL),
+        "KEY_LEFTCTRL" => Some(Key::KEY_LEFTCTRL),
+        "KEY_RIGHTALT" => Some(Key::KEY_RIGHTALT),
+        "KEY_LEFTALT" => Some(Key::KEY_LEFTALT),
+        "KEY_RIGHTMETA" => Some(Key::KEY_RIGHTMETA),
+        "KEY_LEFTMETA" => Some(Key::KEY_LEFTMETA),
+        "KEY_CAPSLOCK" => Some(Key::KEY_CAPSLOCK),
         "KEY_RIGHTSHIFT" => Some(Key::KEY_RIGHTSHIFT),
-        "KEY_LEFTSHIFT"  => Some(Key::KEY_LEFTSHIFT),
+        "KEY_LEFTSHIFT" => Some(Key::KEY_LEFTSHIFT),
         _ => None,
     }
 }
 
 fn open_keyboards(key: Key) -> Vec<EventStream> {
-    let Ok(paths) = std::fs::read_dir("/dev/input") else { return vec![] };
+    let Ok(paths) = std::fs::read_dir("/dev/input") else {
+        return vec![];
+    };
     paths
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with("event"))
@@ -44,7 +46,9 @@ impl EvdevBackend {
             if ev.event_type() != EventType::KEY {
                 continue;
             }
-            let InputEventKind::Key(k) = ev.kind() else { continue };
+            let InputEventKind::Key(k) = ev.kind() else {
+                continue;
+            };
             if k != key {
                 continue;
             }

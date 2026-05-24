@@ -52,8 +52,14 @@ impl HotkeyManager {
             let mut rx = raw_rx;
             while let Some(ev) = rx.recv().await {
                 let forward = match ev {
-                    HotkeyEvent::Pressed if !pressed => { pressed = true; true }
-                    HotkeyEvent::Released if pressed => { pressed = false; true }
+                    HotkeyEvent::Pressed if !pressed => {
+                        pressed = true;
+                        true
+                    }
+                    HotkeyEvent::Released if pressed => {
+                        pressed = false;
+                        true
+                    }
                     _ => false,
                 };
                 if forward && dedup_tx.send(ev).await.is_err() {
@@ -66,9 +72,9 @@ impl HotkeyManager {
         match display::detect() {
             DisplayServer::Wayland => {
                 tokio::spawn(async move {
-                    if let Err(e) = wayland_backend::WaylandBackend::run(
-                        raw_tx.clone(), hotkey.clone(),
-                    ).await {
+                    if let Err(e) =
+                        wayland_backend::WaylandBackend::run(raw_tx.clone(), hotkey.clone()).await
+                    {
                         tracing::warn!("wayland portal unavailable ({e}), trying X11 + evdev");
                         if std::env::var_os("DISPLAY").is_some() {
                             let tx = raw_tx.clone();
@@ -86,9 +92,18 @@ impl HotkeyManager {
                 });
             }
             DisplayServer::X11 => {
-                std::thread::spawn(move || {
-                    if let Err(e) = x11_backend::X11Backend::run(raw_tx, &hotkey) {
-                        tracing::error!("x11 backend exited: {e}");
+                tokio::spawn(async move {
+                    let tx = raw_tx.clone();
+                    let hk = hotkey.clone();
+                    let result =
+                        tokio::task::spawn_blocking(move || x11_backend::X11Backend::run(tx, &hk))
+                            .await
+                            .unwrap_or_else(|_| Err(HotkeyError::StreamClosed));
+                    if let Err(e) = result {
+                        tracing::warn!("x11 exited: {e}, trying evdev fallback");
+                        if let Err(e) = evdev_backend::EvdevBackend::run(raw_tx, &hotkey).await {
+                            tracing::error!("evdev fallback exited: {e}");
+                        }
                     }
                 });
             }

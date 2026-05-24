@@ -8,6 +8,10 @@ ExecStart=/usr/local/lib/linux-flow/linux-flow-helper
 PassEnvironment=WAYLAND_DISPLAY DISPLAY
 Restart=on-failure
 RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target

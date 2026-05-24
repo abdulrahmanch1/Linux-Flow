@@ -61,19 +61,29 @@ pub fn build_settings() -> adw::PreferencesWindow {
         move |_| {
             if let Err(e) = patch_config(|c| {
                 let v = hotkey_row.text().to_string();
-                if !v.is_empty() { c.general.hotkey = v; }
+                if !v.is_empty() {
+                    c.general.hotkey = v;
+                }
                 let v = lang_row.text().to_string();
-                if !v.is_empty() { c.soniox.language = v; }
+                if !v.is_empty() {
+                    c.soniox.language = v;
+                }
                 let v = model_row.text().to_string();
-                if !v.is_empty() { c.llm.model = v; }
+                if !v.is_empty() {
+                    c.llm.model = v;
+                }
             }) {
                 win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
                 return;
             }
             let soniox_v = Zeroizing::new(soniox_key_row.text().to_string());
-            if !soniox_v.is_empty() { spawn_save_key("soniox", soniox_v); }
+            if !soniox_v.is_empty() {
+                spawn_save_key("soniox", soniox_v);
+            }
             let or_v = Zeroizing::new(openrouter_key_row.text().to_string());
-            if !or_v.is_empty() { spawn_save_key("openrouter", or_v); }
+            if !or_v.is_empty() {
+                spawn_save_key("openrouter", or_v);
+            }
             win.close();
         }
     });
@@ -82,7 +92,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
 }
 
 fn patch_config(update: impl FnOnce(&mut Config)) -> Result<(), String> {
-    let mut cfg = Config::load().unwrap_or_default();
+    let mut cfg = Config::load().map_err(|e| e.to_string())?;
     update(&mut cfg);
     cfg.save().map_err(|e| e.to_string())
 }

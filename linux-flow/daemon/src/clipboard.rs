@@ -49,10 +49,13 @@ fn pipe(cmd: &str, args: &[&str], text: &str) -> Result<(), DaemonError> {
     drop(stdin);
     let status = child.wait().map_err(DaemonError::Io)?;
     if !status.success() {
-        let code = status.code()
+        let code = status
+            .code()
             .map(|c| c.to_string())
             .unwrap_or_else(|| "killed by signal".into());
-        return Err(DaemonError::InjectionFailed(format!("{cmd} exited with code {code}")));
+        return Err(DaemonError::InjectionFailed(format!(
+            "{cmd} exited with code {code}"
+        )));
     }
     Ok(())
 }

@@ -45,9 +45,15 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            general: General { hotkey: "KEY_RIGHTCTRL".into() },
-            llm: Llm { model: "google/gemini-2.0-flash-lite-001".into() },
-            soniox: Soniox { language: "auto".into() },
+            general: General {
+                hotkey: "KEY_RIGHTCTRL".into(),
+            },
+            llm: Llm {
+                model: "google/gemini-2.0-flash-lite-001".into(),
+            },
+            soniox: Soniox {
+                language: "auto".into(),
+            },
             ui: Ui { show_tray: true },
         }
     }

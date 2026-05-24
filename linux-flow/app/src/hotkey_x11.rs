@@ -3,9 +3,8 @@ use std::ptr;
 
 use tokio::sync::mpsc;
 use x11::xlib::{
-    AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask,
-    XCloseDisplay, XDefaultRootWindow, XEvent, XGrabKey, XNextEvent,
-    XOpenDisplay, XSelectInput, XUngrabKey,
+    AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask, XCloseDisplay,
+    XDefaultRootWindow, XEvent, XGrabKey, XNextEvent, XOpenDisplay, XSelectInput, XUngrabKey,
 };
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
@@ -15,15 +14,15 @@ fn evdev_name_to_x11_keycode(name: &str) -> Option<u8> {
     // when the compositor omits a keysym entry for the key, e.g. Control_R
     // on COSMIC's XWayland).
     let evdev: u8 = match name {
-        "KEY_RIGHTCTRL"  => 97,
-        "KEY_LEFTCTRL"   => 29,
-        "KEY_RIGHTALT"   => 108,
-        "KEY_LEFTALT"    => 56,
-        "KEY_RIGHTMETA"  => 126,
-        "KEY_LEFTMETA"   => 125,
-        "KEY_CAPSLOCK"   => 58,
+        "KEY_RIGHTCTRL" => 97,
+        "KEY_LEFTCTRL" => 29,
+        "KEY_RIGHTALT" => 108,
+        "KEY_LEFTALT" => 56,
+        "KEY_RIGHTMETA" => 126,
+        "KEY_LEFTMETA" => 125,
+        "KEY_CAPSLOCK" => 58,
         "KEY_RIGHTSHIFT" => 54,
-        "KEY_LEFTSHIFT"  => 42,
+        "KEY_LEFTSHIFT" => 42,
         _ => return None,
     };
     Some(evdev + 8)
@@ -75,7 +74,10 @@ impl X11Backend {
         let mut event: XEvent = unsafe { std::mem::zeroed() };
 
         loop {
-            unsafe { XNextEvent(display, &mut event) };
+            let ret = unsafe { XNextEvent(display, &mut event) };
+            if ret < 0 {
+                return Err(HotkeyError::X11Connect);
+            }
 
             let (ty, code) = unsafe { (event.type_, event.key.keycode) };
 

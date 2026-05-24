@@ -1,6 +1,5 @@
 mod clipboard;
 mod error;
-mod keymap;
 mod keys;
 mod server;
 mod uinput;
@@ -16,9 +15,14 @@ async fn main() -> Result<(), error::DaemonError> {
 
     let mut sigterm = signal(SignalKind::terminate())
         .map_err(|e| error::DaemonError::SocketPath(format!("SIGTERM handler: {e}")))?;
+    let mut sigint = signal(SignalKind::interrupt())
+        .map_err(|e| error::DaemonError::SocketPath(format!("SIGINT handler: {e}")))?;
 
     tokio::spawn(async move {
-        sigterm.recv().await;
+        tokio::select! {
+            _ = sigterm.recv() => {}
+            _ = sigint.recv() => {}
+        }
         let _ = shutdown_tx.send(());
     });
 

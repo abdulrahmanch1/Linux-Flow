@@ -49,9 +49,13 @@ async fn read_from_keyring(service_name: &str) -> Result<Zeroizing<String>, Secr
     }
     let attrs = HashMap::from([(ATTR_SERVICE, service_name)]);
     let items = collection.search_items(attrs).await?;
-    let item = items.first().ok_or_else(|| SecretsError::NotFound(service_name.into()))?;
+    let item = items
+        .first()
+        .ok_or_else(|| SecretsError::NotFound(service_name.into()))?;
     let mut raw = item.get_secret().await?;
-    let s = std::str::from_utf8(&raw).map_err(|_| SecretsError::Utf8)?.to_owned();
+    let s = std::str::from_utf8(&raw)
+        .map_err(|_| SecretsError::Utf8)?
+        .to_owned();
     zeroize::Zeroize::zeroize(&mut raw);
     Ok(Zeroizing::new(s))
 }

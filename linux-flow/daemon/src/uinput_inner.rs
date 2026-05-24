@@ -66,6 +66,7 @@ pub const ALL_KEYS: &[u16] = &[
     keys::KEY_SLASH,
     keys::KEY_BACKSLASH,
     keys::KEY_GRAVE,
+    keys::KEY_PASTE,
 ];
 
 #[repr(C)]
@@ -91,17 +92,17 @@ pub struct Inner {
 impl Inner {
     pub fn write_event(&mut self, typ: u16, code: u16, value: i32) -> Result<(), DaemonError> {
         let ev = libc::input_event {
-            time: libc::timeval { tv_sec: 0, tv_usec: 0 },
+            time: libc::timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
             type_: typ,
             code,
             value,
         };
         // SAFETY: input_event is repr(C); reinterpreting as a byte slice is valid.
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &ev as *const _ as *const u8,
-                std::mem::size_of_val(&ev),
-            )
+            std::slice::from_raw_parts(&ev as *const _ as *const u8, std::mem::size_of_val(&ev))
         };
         self.fd.write_all(bytes)?;
         Ok(())
@@ -112,33 +113,18 @@ impl Inner {
         self.write_event(keys::EV_SYN, keys::SYN_REPORT, 0)
     }
 
-    pub fn inject_latin_char(&mut self, code: u16, shift: bool) -> Result<(), DaemonError> {
-        if shift {
-            self.key_event(keys::KEY_LEFTSHIFT, true)?;
-        }
-        self.key_event(code, true)?;
-        self.key_event(code, false)?;
-        if shift {
-            self.key_event(keys::KEY_LEFTSHIFT, false)?;
-        }
-        thread::sleep(Duration::from_micros(500));
-        Ok(())
-    }
-
     pub fn inject_via_clipboard(
         &mut self,
         text: &str,
         display: DisplayServer,
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text)?;
-        // Give the compositor time to register the new clipboard contents.
-        thread::sleep(Duration::from_millis(50));
-        self.key_event(keys::KEY_LEFTCTRL, true)?;
-        thread::sleep(Duration::from_millis(10));
-        self.key_event(keys::KEY_V, true)?;
-        self.key_event(keys::KEY_V, false)?;
-        self.key_event(keys::KEY_LEFTCTRL, false)?;
-        thread::sleep(Duration::from_millis(100));
+        // Give the compositor time to register the new clipboard contents before paste.
+        thread::sleep(Duration::from_millis(20));
+        // KEY_PASTE is a layout-independent paste key (0x161); the compositor handles
+        // it without going through the XKB layer, so it works with any keyboard layout.
+        self.key_event(keys::KEY_PASTE, true)?;
+        self.key_event(keys::KEY_PASTE, false)?;
         clipboard::clipboard_clear(display);
         Ok(())
     }

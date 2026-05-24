@@ -28,12 +28,22 @@ pub(crate) fn page_polkit(
     next.add_css_class("suggested-action");
 
     next.connect_clicked(glib::clone!(
-        #[strong] state, #[weak] next, #[weak] status,
+        #[strong]
+        state,
+        #[weak]
+        next,
+        #[weak]
+        status,
         move |_| crate::wizard_complete::spawn_finish(Rc::clone(&state), next, status)
     ));
 
     auth_btn.connect_clicked(glib::clone!(
-        #[weak] status, #[weak] next, #[weak] auth_btn,
+        #[weak]
+        status,
+        #[weak]
+        next,
+        #[weak]
+        auth_btn,
         move |_| spawn_pkcheck(status, next, auth_btn)
     ));
 
@@ -64,10 +74,7 @@ pub(crate) fn page_polkit(
 fn read_proc_start_time() -> Result<String, String> {
     let stat = std::fs::read_to_string("/proc/self/stat").map_err(|e| e.to_string())?;
     // Field 2 (comm) is wrapped in '()' and may contain spaces; split on the last ')'.
-    let rest = stat
-        .rsplit(')')
-        .next()
-        .ok_or("malformed /proc/self/stat")?;
+    let rest = stat.rsplit(')').next().ok_or("malformed /proc/self/stat")?;
     // starttime is field 22 (1-indexed) = index 19 after the closing ')'.
     let start_time = rest
         .split_whitespace()
@@ -99,8 +106,10 @@ fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button
     std::thread::spawn(move || {
         let result = std::process::Command::new("pkcheck")
             .args([
-                "--action-id", POLKIT_ACTION,
-                "--process", &process_arg,
+                "--action-id",
+                POLKIT_ACTION,
+                "--process",
+                &process_arg,
                 "--allow-user-interaction",
             ])
             .status()
@@ -109,7 +118,9 @@ fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button
                 if s.success() {
                     Ok(())
                 } else {
-                    let code = s.code().map_or_else(|| "signal".to_string(), |c| c.to_string());
+                    let code = s
+                        .code()
+                        .map_or_else(|| "signal".to_string(), |c| c.to_string());
                     Err(format!("authorization denied (exit {code})"))
                 }
             });

@@ -1,7 +1,7 @@
 use gtk4::{glib, prelude::*};
 use libadwaita::{self as adw, prelude::*};
 use std::{cell::RefCell, rc::Rc};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 pub(crate) struct WizardState {
     pub soniox_key: Zeroizing<String>,
@@ -60,14 +60,34 @@ fn page_soniox(state: Rc<RefCell<WizardState>>, nav: adw::NavigationView) -> adw
     next.set_sensitive(false);
     next.add_css_class("suggested-action");
 
-    entry.connect_changed(glib::clone!(#[weak] next, move |e| {
-        next.set_sensitive(!e.text().is_empty());
-    }));
+    entry.connect_changed(glib::clone!(
+        #[weak]
+        next,
+        move |e| {
+            next.set_sensitive(!e.text().is_empty());
+        }
+    ));
 
-    next.connect_clicked(glib::clone!(#[weak] entry, #[weak] nav, #[strong] state, move |_| {
-        state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
-        nav.push(&page_openrouter(Rc::clone(&state), nav.clone()));
-    }));
+    {
+        let mut stored = state.borrow().soniox_key.as_str().to_owned();
+        if !stored.is_empty() {
+            entry.set_text(&stored);
+        }
+        stored.zeroize();
+    }
+
+    next.connect_clicked(glib::clone!(
+        #[weak]
+        entry,
+        #[weak]
+        nav,
+        #[strong]
+        state,
+        move |_| {
+            state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
+            nav.push(&page_openrouter(Rc::clone(&state), nav.clone()));
+        }
+    ));
 
     let group = adw::PreferencesGroup::new();
     group.add(&entry);
@@ -94,7 +114,10 @@ fn page_soniox(state: Rc<RefCell<WizardState>>, nav: adw::NavigationView) -> adw
     adw::NavigationPage::new(&toolbar, "Soniox API Key")
 }
 
-fn page_openrouter(state: Rc<RefCell<WizardState>>, nav: adw::NavigationView) -> adw::NavigationPage {
+fn page_openrouter(
+    state: Rc<RefCell<WizardState>>,
+    nav: adw::NavigationView,
+) -> adw::NavigationPage {
     let key_entry = adw::PasswordEntryRow::new();
     key_entry.set_title("OpenRouter API Key");
 
@@ -107,19 +130,52 @@ fn page_openrouter(state: Rc<RefCell<WizardState>>, nav: adw::NavigationView) ->
     next.set_sensitive(false);
     next.add_css_class("suggested-action");
 
-    key_entry.connect_changed(glib::clone!(#[weak] model_entry, #[weak] next, move |e| {
-        next.set_sensitive(!e.text().is_empty() && !model_entry.text().is_empty());
-    }));
+    key_entry.connect_changed(glib::clone!(
+        #[weak]
+        model_entry,
+        #[weak]
+        next,
+        move |e| {
+            next.set_sensitive(!e.text().is_empty() && !model_entry.text().is_empty());
+        }
+    ));
 
-    model_entry.connect_changed(glib::clone!(#[weak] key_entry, #[weak] next, move |e| {
-        next.set_sensitive(!key_entry.text().is_empty() && !e.text().is_empty());
-    }));
+    {
+        let mut stored = state.borrow().openrouter_key.as_str().to_owned();
+        if !stored.is_empty() {
+            key_entry.set_text(&stored);
+        }
+        stored.zeroize();
+    }
 
-    next.connect_clicked(glib::clone!(#[weak] key_entry, #[weak] model_entry, #[weak] nav, #[strong] state, move |_| {
-        state.borrow_mut().openrouter_key = Zeroizing::new(key_entry.text().to_string());
-        state.borrow_mut().model = model_entry.text().to_string();
-        nav.push(&crate::wizard_hotkey::page_hotkey(Rc::clone(&state), nav.clone()));
-    }));
+    model_entry.connect_changed(glib::clone!(
+        #[weak]
+        key_entry,
+        #[weak]
+        next,
+        move |e| {
+            next.set_sensitive(!key_entry.text().is_empty() && !e.text().is_empty());
+        }
+    ));
+
+    next.connect_clicked(glib::clone!(
+        #[weak]
+        key_entry,
+        #[weak]
+        model_entry,
+        #[weak]
+        nav,
+        #[strong]
+        state,
+        move |_| {
+            state.borrow_mut().openrouter_key = Zeroizing::new(key_entry.text().to_string());
+            state.borrow_mut().model = model_entry.text().to_string();
+            nav.push(&crate::wizard_hotkey::page_hotkey(
+                Rc::clone(&state),
+                nav.clone(),
+            ));
+        }
+    ));
 
     let group = adw::PreferencesGroup::new();
     group.add(&key_entry);

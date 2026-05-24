@@ -7,9 +7,19 @@ pub const RESPONSE_ERR: u8 = 0x01;
 /// Maximum allowed payload size — guards against memory exhaustion.
 const MAX_PAYLOAD_BYTES: usize = 1024 * 1024; // 1 MB
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum IpcRequest {
     InjectText { text: String },
+}
+
+impl std::fmt::Debug for IpcRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpcRequest::InjectText { text } => {
+                write!(f, "InjectText {{ text: [REDACTED, {} bytes] }}", text.len())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

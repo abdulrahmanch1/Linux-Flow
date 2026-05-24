@@ -100,8 +100,14 @@ impl LlmClient {
         transcript: &str,
     ) -> Result<String, LlmError> {
         let messages = [
-            ChatMessage { role: "system", content: SYSTEM_PROMPT },
-            ChatMessage { role: "user", content: transcript },
+            ChatMessage {
+                role: "system",
+                content: SYSTEM_PROMPT,
+            },
+            ChatMessage {
+                role: "user",
+                content: transcript,
+            },
         ];
         let payload = Payload {
             model,
@@ -121,7 +127,13 @@ impl LlmClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { LlmError::Timeout } else { LlmError::Reqwest(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    LlmError::Timeout
+                } else {
+                    LlmError::Reqwest(e)
+                }
+            })?;
 
         auth.zeroize();
 
@@ -130,15 +142,24 @@ impl LlmClient {
             return Err(LlmError::Unauthorized);
         }
         if !status.is_success() {
-            let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+            let body: String = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(300)
+                .collect();
             tracing::warn!("llm: HTTP {} — {}", status.as_u16(), body);
             return Err(LlmError::Http(status.as_u16()));
         }
 
-        let body: OrResponse = resp
-            .json()
-            .await
-            .map_err(|e| if e.is_timeout() { LlmError::Timeout } else { LlmError::Reqwest(e) })?;
+        let body: OrResponse = resp.json().await.map_err(|e| {
+            if e.is_timeout() {
+                LlmError::Timeout
+            } else {
+                LlmError::Reqwest(e)
+            }
+        })?;
 
         body.choices
             .into_iter()

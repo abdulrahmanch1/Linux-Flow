@@ -23,6 +23,8 @@ pub enum AsrError {
     Unauthorized,
     #[error("stream error: {0}")]
     Stream(String),
+    #[error("Soniox server error {code}: {message}")]
+    ServerError { code: u32, message: String },
     #[error("websocket: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("json: {0}")]
@@ -50,7 +52,7 @@ struct SonioxResponse {
 /// Connects to Soniox, streams PCM audio from `audio_rx`, sends EOS when the
 /// channel closes (hotkey released), then returns the final transcript.
 ///
-/// Timeouts: 3 s to establish the connection; 8 s from EOS to `finished`.
+/// Timeouts: 3 s to establish the connection; 30 s from EOS to `finished`.
 pub async fn transcribe(
     mut api_key: Zeroizing<String>,
     language: &str,
@@ -64,17 +66,23 @@ pub async fn transcribe(
     let (mut sink, stream) = ws.split();
 
     // Build and send the config frame, then zeroize the api_key immediately.
-    let hints: Vec<&str> = if language == "auto" { vec![] } else { vec![language] };
-    let mut config_str = Zeroizing::new(json!({
-        "api_key": *api_key,
-        "model": "stt-rt-v4",
-        "audio_format": "pcm_s16le",
-        "sample_rate": 16000,
-        "num_channels": 1,
-        "enable_language_identification": true,
-        "language_hints": hints,
-    })
-    .to_string());
+    let hints: Vec<&str> = if language == "auto" {
+        vec![]
+    } else {
+        vec![language]
+    };
+    let mut config_str = Zeroizing::new(
+        json!({
+            "api_key": *api_key,
+            "model": "stt-rt-v4",
+            "audio_format": "pcm_s16le",
+            "sample_rate": 16000,
+            "num_channels": 1,
+            "enable_language_identification": true,
+            "language_hints": hints,
+        })
+        .to_string(),
+    );
     api_key.zeroize();
     let msg_text = (*config_str).clone();
     config_str.zeroize();
@@ -95,13 +103,18 @@ pub async fn transcribe(
             let resp: SonioxResponse = serde_json::from_str(&text)?;
             tracing::info!(
                 "asr: msg error={} finished={} tokens={}",
-                resp.error_code, resp.finished, resp.tokens.len()
+                resp.error_code,
+                resp.finished,
+                resp.tokens.len()
             );
             if resp.error_code == 401 {
                 return Err(AsrError::Unauthorized);
             }
             if resp.error_code != 0 {
-                return Err(AsrError::Stream(resp.error_message));
+                return Err(AsrError::ServerError {
+                    code: resp.error_code,
+                    message: resp.error_message,
+                });
             }
             for token in resp.tokens {
                 if token.is_final {
@@ -112,7 +125,9 @@ pub async fn transcribe(
                 return Ok(transcript);
             }
         }
-        Err(AsrError::Stream("connection closed before finished signal".into()))
+        Err(AsrError::Stream(
+            "connection closed before finished signal".into(),
+        ))
     });
 
     // Forward PCM chunks until the audio channel closes (hotkey released).
@@ -135,7 +150,10 @@ pub async fn transcribe(
     // 30 s timeout starts after EOS.
     let result = timeout(STREAM_TIMEOUT, read_task)
         .await
-        .map_err(|_| { abort.abort(); AsrError::StreamTimeout })?
+        .map_err(|_| {
+            abort.abort();
+            AsrError::StreamTimeout
+        })?
         .map_err(|e| AsrError::Stream(e.to_string()))?;
     drop(sink);
     result

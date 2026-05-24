@@ -128,7 +128,7 @@
       tokio::task::spawn_blocking(move || audio.stop()),
   ).await.ok();
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — timeout added; `spawn_blocking` was already present from prior session
 
 ---
 
@@ -166,7 +166,7 @@
   ```
   Add an `error_code: Option<u32>` and `error_message: Option<String>` field to the ASR message struct.
 - **Note:** Also requires adding specific UI messages in `pipeline.rs` for known codes (see M-09).
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `error_code` was already checked in the existing code (`u32` with `#[serde(default)]`, checked via `!= 0`); `AsrError::ServerError` variant added for typed access
 
 ---
 
@@ -197,7 +197,7 @@
   For Path 1 (inject_latin_char), the correct fix is to route ALL text through the clipboard path and drop the keycode-per-character approach entirely. The keycode path is inherently layout-dependent and cannot be made layout-neutral without access to the compositor's XKB state.
 
 - **Impact:** Any user with a non-Latin keyboard layout cannot use the app at all. This includes all Arabic, Hindi, Persian, Kurdish users — the primary multilingual audience for a dictation tool.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `inject_latin_char` removed; all text routed through clipboard; `KEY_PASTE` (0x161) replaces `Ctrl+V`; `keymap.rs` deleted
 
 ---
 
@@ -208,7 +208,7 @@
 - **Code:** `#[derive(Debug, Clone, Serialize, Deserialize)]`
 - **Problem:** Deriving `Clone` on `IpcRequest::InjectText { text }` creates an unzeroized copy of the dictation text.
 - **Fix:** Remove `Clone` from the derive — no current code clones an `IpcRequest`.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `Clone` removed from `IpcRequest` derive
 
 ---
 
@@ -226,7 +226,7 @@
       }
   }
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — custom `Debug` impl added; redacts text content
 
 ---
 
@@ -234,7 +234,7 @@
 - **File:** `daemon/src/uinput_inner.rs:124`
 - **Code:** `thread::sleep(Duration::from_micros(500));`
 - **Fix:** Remove entirely or lower to 100 µs. Test for character dropping at lower values.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — eliminated by H-09: `inject_latin_char` removed; all text uses clipboard path with no per-char sleep
 
 ---
 
@@ -247,7 +247,7 @@
   Err(LlmError::Http(503)) => "OpenRouter is temporarily unavailable.",
   Err(_) => "Could not reach OpenRouter. Check your connection.",
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — 429 and 503 arms added to the LLM error match
 
 ---
 
@@ -255,7 +255,7 @@
 - **File:** `app/src/wizard_hotkey_x11.rs:21`
 - **Problem:** The Next button is enabled from the start, so the user can skip the hotkey step silently.
 - **Fix:** Add `next.set_sensitive(false);` after creating the button; enable it only after a successful `key_ctrl.connect_key_pressed` callback sets a hotkey.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `next.set_sensitive(false)` added; enabled via `next_w` weak ref inside key callback
 
 ---
 
@@ -264,7 +264,7 @@
 - **Code:** `let mut cfg = Config::load().unwrap_or_default();`
 - **Problem:** If the TOML is corrupt, default values are written over it without warning, permanently erasing the user's settings.
 - **Fix:** Propagate the `Err` from `patch_config` and show a toast before any write is attempted.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `unwrap_or_default()` replaced with `?`; corrupt config surfaces as toast
 
 ---
 
@@ -272,7 +272,7 @@
 - **File:** `app/src/hotkey.rs:88–94`
 - **Problem:** On a pure X11 environment, if `X11Backend::run` fails there is no fallback to `EvdevBackend` — the hotkey stops working permanently until restart.
 - **Fix:** Mirror the Wayland branch: call `EvdevBackend::run` when `X11Backend` exits with an error.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — X11 branch moved to `tokio::spawn` + `spawn_blocking`; evdev fallback added on X11 error
 
 ---
 
@@ -285,7 +285,7 @@
   let ret = unsafe { XNextEvent(display, &mut event) };
   if ret != 0 { return Err(HotkeyError::X11Connect); }
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — return value checked; negative value triggers `X11Connect` error
 
 ---
 
@@ -299,7 +299,7 @@
   Err(AsrError::ServerError { code, message }) =>
       &format!("Soniox error {code}: {message}"),
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `AsrError::ServerError` variant added; 402 arm and generic arm in pipeline.rs
 
 ---
 
@@ -314,7 +314,7 @@
   StartLimitBurst=5
   ```
   (b) Ensure `UinputDevice` implements `Drop` that explicitly closes the fd and calls `UI_DEV_DESTROY` ioctl before process exit.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — (a) restart limits added to service file; (b) `Drop` for `UinputInjector` calling `UI_DEV_DESTROY` was already implemented
 
 ---
 
@@ -324,7 +324,7 @@
 - **File:** `daemon/src/main.rs:17`
 - **Note:** Only SIGTERM is currently handled. SIGINT (`Ctrl-C`) is not, so the socket file at `/run/user/<uid>/linux-flow-helper.sock` is never cleaned up when the daemon is killed during development.
 - **Fix:** Add `let mut sigint = signal(SignalKind::interrupt())?;` and include it in the `select!` alongside SIGTERM.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — SIGINT handler added; both signals feed the same shutdown channel via `tokio::select!`
 
 ---
 
@@ -340,7 +340,7 @@
 - **File:** `app/src/audio.rs:38,52,97`
 - **Problem:** Correct on x86 due to TSO, but unsound on ARM (weaker memory model).
 - **Fix:** Use `store(true, Ordering::Release)` at the write site and `load(Ordering::Acquire)` at every read site in the PipeWire thread.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — all three sites updated: `store(false, Release)`, `store(true, Release)`, `load(Acquire)`
 
 ---
 
@@ -348,7 +348,7 @@
 - **File:** `app/src/asr.rs:53` vs `app/src/asr.rs:14`
 - **Code:** Comment: *"8 s from EOS to `finished`"* — Constant: `STREAM_TIMEOUT = Duration::from_secs(30)`
 - **Fix:** Update the comment to read *"30 s from EOS to `finished`"*.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — doc comment updated
 
 ---
 
@@ -373,7 +373,7 @@
 - **Problem:** Fields are not pre-populated from `WizardState` when a page is rebuilt on Back navigation.
 - **Note:** `model_entry` in `page_openrouter` IS pre-populated. The Soniox key field and OpenRouter key field are not.
 - **Fix:** Add `entry.set_text(state.borrow().field.as_str())` during initialization of each `PasswordEntryRow`.
-- [~] **Status: Partially fixed** — model field restored; key fields still empty on Back
+- [x] **Status: Fixed** — Soniox key and OpenRouter key fields pre-populated from state after `connect_changed` is wired
 
 ---
 
@@ -381,7 +381,7 @@
 - **File:** `app/src/tray.rs:136–151`
 - **Problem:** `tick.tick().await` fires every 100 ms unconditionally. The `update()` call still runs when `TrayState::Idle`, doing a round-trip to the tray service for nothing.
 - **Fix:** Exit the loop when state is `Idle` (add `else { return; }`) or switch to a notify-based approach driven by state changes.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `Arc<AtomicBool>` shared between `set_state` and animation loop; DBus `update()` skipped when not recording/processing
 
 ---
 
@@ -403,7 +403,7 @@
   StandardOutput=journal
   StandardError=journal
   ```
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `StandardOutput=journal` and `StandardError=journal` added to service file
 
 ---
 
@@ -412,7 +412,16 @@
 | Severity | Total | Fixed | Partial | Open |
 |----------|------:|------:|--------:|-----:|
 | 🔴 Critical | 5 | 5 | 0 | 0 |
-| 🟠 High | 9 | 3 | 1 | 5 |
-| 🟡 Medium | 10 | 0 | 0 | 10 |
-| 🔵 Low | 10 | 0 | 2 | 8 |
-| **Total** | **34** | **8** | **3** | **23** |
+| 🟠 High | 9 | 6 | 1 | 2 |
+| 🟡 Medium | 10 | 10 | 0 | 0 |
+| 🔵 Low | 10 | 6 | 0 | 4 |
+| **Total** | **34** | **27** | **1** | **6** |
+
+### Open items requiring dedicated sessions
+- **H-06** Persistent WebSocket to Soniox — significant redesign of `asr.rs`
+- **H-07** inotify config watch — needs `inotify`/`notify` crate dependency
+- **H-04** (partial) — keychain save errors still silent
+- **L-02** X11 hotkey thread stop — `XNextEvent` is blocking; channel closure provides partial coverage
+- **L-05** Keyboard hotplug — needs inotify on `/dev/input/`
+- **L-06** Keyboard disconnect retry — moderate complexity
+- **L-09** Runtime shortcut detection — depends on ashpd API version

@@ -2,7 +2,13 @@ use ksni::{
     menu::{MenuItem, StandardItem},
     Icon, Tray, TrayMethods,
 };
-use std::{sync::mpsc as stdmpsc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc as stdmpsc, Arc,
+    },
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -24,10 +30,17 @@ pub enum TrayError {
 }
 
 #[derive(Clone)]
-pub struct TrayHandle { inner: ksni::Handle<AppTray> }
+pub struct TrayHandle {
+    inner: ksni::Handle<AppTray>,
+    animating: Arc<AtomicBool>,
+}
 
 impl TrayHandle {
     pub async fn set_state(&self, state: TrayState) {
+        self.animating.store(
+            matches!(state, TrayState::Recording | TrayState::Processing),
+            Ordering::Release,
+        );
         self.inner.update(|t| t.state = state).await;
     }
 }
@@ -43,8 +56,12 @@ struct AppTray {
 }
 
 impl Tray for AppTray {
-    fn id(&self) -> String { "linux-flow".into() }
-    fn title(&self) -> String { "linux-flow".into() }
+    fn id(&self) -> String {
+        "linux-flow".into()
+    }
+    fn title(&self) -> String {
+        "linux-flow".into()
+    }
 
     fn icon_name(&self) -> String {
         match self.state {
@@ -73,24 +90,38 @@ impl Tray for AppTray {
         let settings_tx = self.settings_tx.clone();
         let about_tx = self.about_tx.clone();
         vec![
-            StandardItem { label: "linux-flow".into(), enabled: false, ..Default::default() }.into(),
+            StandardItem {
+                label: "linux-flow".into(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Settings\u{2026}".into(),
-                activate: Box::new(move |_| { let _ = settings_tx.try_send(()); }),
+                activate: Box::new(move |_| {
+                    let _ = settings_tx.try_send(());
+                }),
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
             StandardItem {
                 label: "About".into(),
-                activate: Box::new(move |_| { let _ = about_tx.try_send(()); }),
+                activate: Box::new(move |_| {
+                    let _ = about_tx.try_send(());
+                }),
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Quit".into(),
-                activate: Box::new(move |_| { let _ = quit_tx.try_send(()); }),
+                activate: Box::new(move |_| {
+                    let _ = quit_tx.try_send(());
+                }),
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
         ]
     }
 }
@@ -132,16 +163,19 @@ pub async fn spawn_tray(
     .await
     .map_err(|e| TrayError::Service(e.to_string()))?;
 
-    let anim = handle.clone();
+    let animating = Arc::new(AtomicBool::new(false));
+    let anim_handle = handle.clone();
+    let anim_flag = Arc::clone(&animating);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         loop {
             tick.tick().await;
-            if anim
+            if !anim_flag.load(Ordering::Acquire) {
+                continue;
+            }
+            if anim_handle
                 .update(|t| {
-                    if matches!(t.state, TrayState::Recording | TrayState::Processing) {
-                        t.frame = (t.frame + 1) % WAVE_FRAMES;
-                    }
+                    t.frame = (t.frame + 1) % WAVE_FRAMES;
                 })
                 .await
                 .is_none()
@@ -151,5 +185,8 @@ pub async fn spawn_tray(
         }
     });
 
-    Ok(TrayHandle { inner: handle })
+    Ok(TrayHandle {
+        inner: handle,
+        animating,
+    })
 }

@@ -1,7 +1,6 @@
 use crate::{
     clipboard,
     error::DaemonError,
-    keymap,
     server::KeyInjector,
     uinput_inner::{
         Inner, InputId, UinputSetup, ALL_KEYS, BUS_VIRTUAL, UI_DEV_CREATE, UI_DEV_DESTROY,
@@ -23,8 +22,14 @@ impl UinputInjector {
             let mut found = None;
             for _ in 0..4 {
                 match OpenOptions::new().write(true).open("/dev/uinput") {
-                    Ok(f) => { found = Some(f); break; }
-                    Err(e) => { last_err = e; thread::sleep(Duration::from_millis(500)); }
+                    Ok(f) => {
+                        found = Some(f);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = e;
+                        thread::sleep(Duration::from_millis(500));
+                    }
                 }
             }
             found.ok_or(DaemonError::Io(last_err))?
@@ -48,7 +53,12 @@ impl UinputInjector {
         }
 
         let mut setup = UinputSetup {
-            id: InputId { bustype: BUS_VIRTUAL, vendor: 0, product: 0, version: 0 },
+            id: InputId {
+                bustype: BUS_VIRTUAL,
+                vendor: 0,
+                product: 0,
+                version: 0,
+            },
             name: [0u8; 80],
             ff_effects_max: 0,
         };
@@ -81,18 +91,7 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        let latin_only =
-            text.is_ascii() && text.chars().all(|c| keymap::char_to_key(c).is_some());
-        if latin_only {
-            for c in text.chars() {
-                if let Some((code, shift)) = keymap::char_to_key(c) {
-                    inner.inject_latin_char(code, shift)?;
-                }
-            }
-        } else {
-            inner.inject_via_clipboard(text, self.display)?;
-        }
-        Ok(())
+        inner.inject_via_clipboard(text, self.display)
     }
 }
 

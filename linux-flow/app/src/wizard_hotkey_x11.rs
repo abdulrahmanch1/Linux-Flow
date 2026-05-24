@@ -19,17 +19,30 @@ pub(crate) fn page_x11(
     capture.set_focusable(true);
 
     let next = gtk4::Button::with_label("Next");
+    next.set_sensitive(false);
     next.add_css_class("suggested-action");
 
-    next.connect_clicked(glib::clone!(#[weak] nav, #[strong] state, move |_| {
-        nav.push(&crate::wizard_polkit::page_polkit(Rc::clone(&state), nav.clone()));
-    }));
+    next.connect_clicked(glib::clone!(
+        #[weak]
+        nav,
+        #[strong]
+        state,
+        move |_| {
+            nav.push(&crate::wizard_polkit::page_polkit(
+                Rc::clone(&state),
+                nav.clone(),
+            ));
+        }
+    ));
 
     let key_ctrl = gtk4::EventControllerKey::new();
     let capture_w = capture.downgrade();
     let status_w = status.downgrade();
+    let next_w = next.downgrade();
     key_ctrl.connect_key_pressed(move |_, keyval, _, _| {
-        let (Some(cap), Some(sts)) = (capture_w.upgrade(), status_w.upgrade()) else {
+        let (Some(cap), Some(sts), Some(nxt)) =
+            (capture_w.upgrade(), status_w.upgrade(), next_w.upgrade())
+        else {
             return glib::Propagation::Proceed;
         };
         let gdk_name = keyval.name().map(|n| n.to_string()).unwrap_or_default();
@@ -38,6 +51,7 @@ pub(crate) fn page_x11(
                 state.borrow_mut().hotkey = evdev.to_string();
                 cap.set_label(&format!("{gdk_name} — press to change"));
                 sts.set_text(&format!("{gdk_name} set as push-to-talk key."));
+                nxt.set_sensitive(true);
             }
             None => sts.set_text(
                 "Unsupported key. Use a modifier key (Ctrl, Alt, Super, Shift, Caps Lock).",

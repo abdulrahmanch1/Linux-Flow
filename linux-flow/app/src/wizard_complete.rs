@@ -6,7 +6,11 @@ use zeroize::Zeroizing;
 
 use crate::wizard::WizardState;
 
-pub(crate) fn spawn_finish(state: Rc<RefCell<WizardState>>, next: gtk4::Button, status: gtk4::Label) {
+pub(crate) fn spawn_finish(
+    state: Rc<RefCell<WizardState>>,
+    next: gtk4::Button,
+    status: gtk4::Label,
+) {
     next.set_sensitive(false);
     status.set_text("Saving configuration…");
 

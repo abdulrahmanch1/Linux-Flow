@@ -63,3 +63,4 @@ pub const KEY_SLASH: u16 = 53;
 
 // Special
 pub const KEY_SPACE: u16 = 57;
+pub const KEY_PASTE: u16 = 0x161;
