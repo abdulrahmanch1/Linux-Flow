@@ -98,7 +98,7 @@ impl LlmClient {
         mut api_key: Zeroizing<String>,
         model: &str,
         transcript: &str,
-    ) -> Result<String, LlmError> {
+    ) -> Result<Zeroizing<String>, LlmError> {
         let messages = [
             ChatMessage {
                 role: "system",
@@ -153,7 +153,7 @@ impl LlmClient {
             return Err(LlmError::Http(status.as_u16()));
         }
 
-        let body: OrResponse = resp.json().await.map_err(|e| {
+        let mut body: OrResponse = resp.json().await.map_err(|e| {
             if e.is_timeout() {
                 LlmError::Timeout
             } else {
@@ -161,11 +161,12 @@ impl LlmClient {
             }
         })?;
 
-        body.choices
-            .into_iter()
-            .next()
-            .and_then(|c| c.message.content)
+        let text = body
+            .choices
+            .first_mut()
+            .and_then(|c| c.message.content.take())
             .filter(|s| !s.trim().is_empty())
-            .ok_or(LlmError::EmptyResponse)
+            .ok_or(LlmError::EmptyResponse)?;
+        Ok(Zeroizing::new(text))
     }
 }
