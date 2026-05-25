@@ -11,7 +11,7 @@ Wispr Flow-style dictation for Linux. Cloud ASR + LLM rewrite, push-to-talk, way
 1. Hotkey held (default: Right Ctrl) → XDG GlobalShortcuts portal (X11: XGrabKey, evdev fallback via `/dev/input/` when both Wayland portal and X11 are unavailable — requires `input` group)
 2. Audio captured via libpipewire (PTT only, mic closed otherwise)
 3. Streamed to Soniox WebSocket (auto-detect, multilingual, code-switching)
-4. On release: full utterance → OpenRouter (`OPENROUTER_API_KEY`, model from `LLM_MODEL`, default `google/gemini-2.0-flash-lite`, with `provider.sort = "throughput"`)
+4. On release: full utterance → OpenRouter (`OPENROUTER_API_KEY`, model from `LLM_MODEL`, default `google/gemini-2.0-flash-lite-001`, with `provider.sort = "throughput"`)
 5. LLM prompt: filler removal, false-start/self-correction handling, reflow grammar, punctuation, capitalization, honor "new line"/"new paragraph". Preserve input language.
 6. Cleaned text → helper over Unix socket → uinput → focused window
 

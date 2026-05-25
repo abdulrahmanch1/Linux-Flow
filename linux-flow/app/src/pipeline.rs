@@ -29,6 +29,13 @@ pub enum PipelineError {
     KeyLoad(String),
 }
 
+/// Sends a pipeline event, logging a warning if the receiver has been dropped.
+async fn send_event(tx: &mpsc::Sender<PipelineEvent>, event: PipelineEvent) {
+    if tx.send(event).await.is_err() {
+        tracing::warn!("pipeline: event channel closed — UI feedback lost");
+    }
+}
+
 pub struct Pipeline {
     config: Config,
     llm: LlmClient,
@@ -59,21 +66,32 @@ impl Pipeline {
                 break;
             }
 
-            if let Ok(fresh) = Config::load() {
-                self.config = fresh;
-            }
-
+            let config_task = tokio::task::spawn_blocking(Config::load);
             let mut audio = AudioCapture::new();
-            let (pcm_rx, audio_err_rx) = match audio.start() {
-                Ok(pair) => pair,
+            let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
+                Ok(triple) => triple,
                 Err(e) => {
-                    let _ = events
-                        .send(PipelineEvent::Error(format!("Audio capture failed: {e}")))
+                    send_event(&events, PipelineEvent::Error(format!("Audio capture failed: {e}")))
                         .await;
                     continue;
                 }
             };
-            let _ = events.send(PipelineEvent::RecordingStarted).await;
+            if let Ok(Ok(fresh)) = config_task.await {
+                self.config = fresh;
+            }
+            if !matches!(
+                tokio::time::timeout(Duration::from_secs(2), ready_rx).await,
+                Ok(Ok(()))
+            ) {
+                let msg = if let Ok(e) = audio_err_rx.try_recv() {
+                    format!("Audio capture failed: {e}")
+                } else {
+                    "Audio device not responding.".into()
+                };
+                send_event(&events, PipelineEvent::Error(msg)).await;
+                continue;
+            }
+            send_event(&events, PipelineEvent::RecordingStarted).await;
             tracing::info!("pipeline: recording started");
 
             let soniox_key = self.soniox_key.clone();
@@ -89,27 +107,29 @@ impl Pipeline {
                 }
             };
             tracing::info!("pipeline: hotkey released={released}");
-            tokio::time::timeout(
-                Duration::from_secs(3),
-                tokio::task::spawn_blocking(move || audio.stop()),
-            )
-            .await
-            .ok();
-            tracing::info!("pipeline: audio stopped");
+            // Fire-and-forget: the stop flag tells PipeWire to quit its loop,
+            // and closing pcm_rx already signals EOS to the ASR task. Joining
+            // the thread is not on the hot path.
+            tokio::task::spawn_blocking(move || audio.stop());
+            tracing::info!("pipeline: audio stop requested");
             if !released {
                 asr.abort();
-                let _ = events
-                    .send(PipelineEvent::Error("Hotkey service disconnected.".into()))
-                    .await;
+                send_event(
+                    &events,
+                    PipelineEvent::Error("Hotkey service disconnected.".into()),
+                )
+                .await;
                 break;
             }
             if let Ok(e) = audio_err_rx.try_recv() {
-                let _ = events
-                    .send(PipelineEvent::Error(format!("Audio capture failed: {e}")))
-                    .await;
+                send_event(
+                    &events,
+                    PipelineEvent::Error(format!("Audio capture failed: {e}")),
+                )
+                .await;
                 continue;
             }
-            let _ = events.send(PipelineEvent::ProcessingStarted).await;
+            send_event(&events, PipelineEvent::ProcessingStarted).await;
             tracing::info!("pipeline: asr waiting");
 
             let asr_joined = asr.await;
@@ -145,7 +165,7 @@ impl Pipeline {
             let mut raw = match asr_result {
                 Ok(t) => t,
                 Err(msg) => {
-                    let _ = events.send(PipelineEvent::Error(msg)).await;
+                    send_event(&events, PipelineEvent::Error(msg)).await;
                     continue;
                 }
             };
@@ -156,7 +176,7 @@ impl Pipeline {
             let llm_res = self.llm.rewrite(self.or_key.clone(), &model, &raw).await;
             tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
             let (mut text, fallback) = match llm_res {
-                Ok(t) => (Zeroizing::new(t), false),
+                Ok(t) => (t, false),
                 Err(LlmError::EmptyResponse) => (
                     std::mem::replace(&mut raw, Zeroizing::new(String::new())),
                     true,
@@ -166,65 +186,75 @@ impl Pipeline {
                     let _ = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
                         .await
                         .map(|k| self.or_key = k);
-                    let _ = events
-                        .send(PipelineEvent::Error(
+                    send_event(
+                        &events,
+                        PipelineEvent::Error(
                             "OpenRouter API key is invalid. Open Settings to update it.".into(),
-                        ))
-                        .await;
+                        ),
+                    )
+                    .await;
                     continue;
                 }
                 Err(LlmError::Http(429)) => {
                     raw.zeroize();
-                    let _ = events
-                        .send(PipelineEvent::Error(
+                    send_event(
+                        &events,
+                        PipelineEvent::Error(
                             "Rate limit reached — try again in a moment.".into(),
-                        ))
-                        .await;
+                        ),
+                    )
+                    .await;
                     continue;
                 }
                 Err(LlmError::Http(503)) => {
                     raw.zeroize();
-                    let _ = events
-                        .send(PipelineEvent::Error(
+                    send_event(
+                        &events,
+                        PipelineEvent::Error(
                             "OpenRouter is temporarily unavailable.".into(),
-                        ))
-                        .await;
+                        ),
+                    )
+                    .await;
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!("pipeline: llm error: {e}");
                     raw.zeroize();
-                    let _ = events
-                        .send(PipelineEvent::Error(
+                    send_event(
+                        &events,
+                        PipelineEvent::Error(
                             "Could not reach OpenRouter. Check your connection.".into(),
-                        ))
-                        .await;
+                        ),
+                    )
+                    .await;
                     continue;
                 }
             };
             raw.zeroize();
             if text.trim().is_empty() {
-                let _ = events
-                    .send(PipelineEvent::Error(
+                send_event(
+                    &events,
+                    PipelineEvent::Error(
                         "No speech detected. Try speaking more clearly.".into(),
-                    ))
-                    .await;
+                    ),
+                )
+                .await;
                 text.zeroize();
                 continue;
             }
             if fallback {
-                let _ = events.send(PipelineEvent::LlmFallback).await;
+                send_event(&events, PipelineEvent::LlmFallback).await;
             }
 
             tracing::info!("pipeline: inject start");
             match inject_text(text.as_str()).await {
                 Ok(()) => {
-                    let _ = events.send(PipelineEvent::TextInjected).await;
+                    send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");
                 }
                 Err(msg) => {
                     tracing::warn!("pipeline: inject err: {msg}");
-                    let _ = events.send(PipelineEvent::Error(msg)).await;
+                    send_event(&events, PipelineEvent::Error(msg)).await;
                 }
             }
             text.zeroize();

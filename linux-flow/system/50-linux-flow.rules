@@ -1,6 +1,6 @@
 polkit.addRule(function(action, subject) {
     if (action.id === "org.linux-flow.helper.manage" &&
-        subject.local && subject.active) {
+        subject.local && subject.active && subject.isInGroup("uinput")) {
         return polkit.Result.YES;
     }
 });

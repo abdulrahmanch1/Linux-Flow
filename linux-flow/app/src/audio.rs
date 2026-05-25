@@ -23,10 +23,16 @@ use std::{
     thread,
 };
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 const SAMPLE_RATE: i32 = 16_000;
 const CHANNELS: i32 = 1;
+
+type StartResult = (
+    mpsc::Receiver<Vec<u8>>,
+    std::sync::mpsc::Receiver<AudioError>,
+    oneshot::Receiver<()>,
+);
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -49,26 +55,19 @@ impl AudioCapture {
         }
     }
 
-    pub fn start(
-        &mut self,
-    ) -> Result<
-        (
-            mpsc::Receiver<Vec<u8>>,
-            std::sync::mpsc::Receiver<AudioError>,
-        ),
-        AudioError,
-    > {
+    pub fn start(&mut self) -> Result<StartResult, AudioError> {
         self.stop_flag.store(false, Ordering::Release);
         let stop = Arc::clone(&self.stop_flag);
         let (pcm_tx, pcm_rx) = mpsc::channel(512);
         let (err_tx, err_rx) = std::sync::mpsc::channel::<AudioError>();
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
         let handle = thread::spawn(move || {
-            if let Err(e) = capture_loop(pcm_tx, stop) {
+            if let Err(e) = capture_loop(pcm_tx, stop, ready_tx) {
                 let _ = err_tx.send(e);
             }
         });
         self.thread = Some(handle);
-        Ok((pcm_rx, err_rx))
+        Ok((pcm_rx, err_rx, ready_rx))
     }
 
     pub fn stop(&mut self) {
@@ -116,7 +115,11 @@ fn audio_params_pod() -> Result<Vec<u8>, AudioError> {
     Ok(w.into_inner())
 }
 
-fn capture_loop(pcm_tx: mpsc::Sender<Vec<u8>>, stop: Arc<AtomicBool>) -> Result<(), AudioError> {
+fn capture_loop(
+    pcm_tx: mpsc::Sender<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+    ready_tx: oneshot::Sender<()>,
+) -> Result<(), AudioError> {
     pipewire::init();
     let mainloop = Rc::new(MainLoop::new(None)?);
     let context = Context::new(&*mainloop)?;
@@ -132,11 +135,14 @@ fn capture_loop(pcm_tx: mpsc::Sender<Vec<u8>>, stop: Arc<AtomicBool>) -> Result<
     )?;
     let ml = Rc::clone(&mainloop);
     let _listener = stream
-        .add_local_listener_with_user_data((pcm_tx, stop, ml))
-        .process(|stream, (tx, stop, ml)| {
+        .add_local_listener_with_user_data((pcm_tx, stop, ml, Some(ready_tx)))
+        .process(|stream, (tx, stop, ml, ready)| {
             if stop.load(Ordering::Acquire) {
                 ml.quit();
                 return;
+            }
+            if let Some(s) = ready.take() {
+                let _ = s.send(());
             }
             if let Some(mut buf) = stream.dequeue_buffer() {
                 if let Some(d) = buf.datas_mut().first_mut() {

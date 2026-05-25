@@ -4,7 +4,6 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use rustls::{ClientConfig, RootCertStore};
 use serde::Deserialize;
-use serde_json::json;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -19,9 +18,8 @@ static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
 
 fn tls_connector() -> Connector {
     let config = TLS_CONFIG.get_or_init(|| {
-        let roots = RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         Arc::new(
             ClientConfig::builder()
                 .with_root_certificates(roots)
@@ -80,7 +78,7 @@ pub async fn transcribe(
     let connector = tls_connector();
     let (ws, _) = timeout(
         CONNECT_TIMEOUT,
-        connect_async_tls_with_config(SONIOX_URL, None, false, Some(connector)),
+        connect_async_tls_with_config(SONIOX_URL, None, true, Some(connector)),
     )
     .await
     .map_err(|_| AsrError::ConnectTimeout)?
@@ -88,25 +86,27 @@ pub async fn transcribe(
 
     let (mut sink, stream) = ws.split();
 
-    let hints: Vec<&str> = if language == "auto" {
-        vec![]
+    let hints_json = if language == "auto" {
+        "[]".to_owned()
     } else {
-        vec![language]
+        format!("[\"{language}\"]")
     };
-    let mut config_str = Zeroizing::new(
-        json!({
-            "api_key": *api_key,
-            "model": "stt-rt-v4",
-            "audio_format": "pcm_s16le",
-            "sample_rate": 16000,
-            "num_channels": 1,
-            "enable_language_identification": true,
-            "language_hints": hints,
-        })
-        .to_string(),
-    );
+    // Build JSON manually to avoid serde_json::Value cloning the API key.
+    let mut config_str = Zeroizing::new(format!(
+        concat!(
+            "{{",
+            "\"api_key\":\"{}\",",
+            "\"model\":\"stt-rt-v4\",",
+            "\"audio_format\":\"pcm_s16le\",",
+            "\"sample_rate\":16000,",
+            "\"num_channels\":1,",
+            "\"enable_language_identification\":true,",
+            "\"language_hints\":{}",
+            "}}"
+        ),
+        *api_key, hints_json,
+    ));
     api_key.zeroize();
-    // Take the String out (leaving config_str empty) so no extra copy of the key exists.
     let to_send = std::mem::take(&mut *config_str);
     config_str.zeroize();
     sink.send(Message::Text(to_send)).await?;
@@ -121,7 +121,7 @@ pub async fn transcribe(
                 Err(e) => return Err(AsrError::WebSocket(e)),
             };
             let resp: SonioxResponse = serde_json::from_str(&text)?;
-            tracing::info!(
+            tracing::debug!(
                 "asr: msg error={} finished={} tokens={}",
                 resp.error_code,
                 resp.finished,
@@ -171,6 +171,5 @@ pub async fn transcribe(
             AsrError::StreamTimeout
         })?
         .map_err(|e| AsrError::Stream(e.to_string()))?;
-    drop(sink);
     result
 }
