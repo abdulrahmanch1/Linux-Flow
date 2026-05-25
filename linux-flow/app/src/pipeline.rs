@@ -59,13 +59,10 @@ impl Pipeline {
                 break;
             }
 
-            if let Ok(fresh) = Config::load() {
-                self.config = fresh;
-            }
-
+            let config_task = tokio::task::spawn_blocking(Config::load);
             let mut audio = AudioCapture::new();
-            let (pcm_rx, audio_err_rx) = match audio.start() {
-                Ok(pair) => pair,
+            let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
+                Ok(triple) => triple,
                 Err(e) => {
                     let _ = events
                         .send(PipelineEvent::Error(format!("Audio capture failed: {e}")))
@@ -73,6 +70,21 @@ impl Pipeline {
                     continue;
                 }
             };
+            if let Ok(Ok(fresh)) = config_task.await {
+                self.config = fresh;
+            }
+            if !matches!(
+                tokio::time::timeout(Duration::from_secs(2), ready_rx).await,
+                Ok(Ok(()))
+            ) {
+                let msg = if let Ok(e) = audio_err_rx.try_recv() {
+                    format!("Audio capture failed: {e}")
+                } else {
+                    "Audio device not responding.".into()
+                };
+                let _ = events.send(PipelineEvent::Error(msg)).await;
+                continue;
+            }
             let _ = events.send(PipelineEvent::RecordingStarted).await;
             tracing::info!("pipeline: recording started");
 
