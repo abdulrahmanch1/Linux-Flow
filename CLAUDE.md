@@ -38,7 +38,7 @@ The PostToolUse hook runs `cargo fmt` and `cargo clippy -D warnings` automatical
 1. Verify the task is fully complete — every requirement in `TASKS.md` for that task is implemented, nothing skipped or stubbed without intent.
 2. Mark the completed task(s) in `TASKS.md` by changing `[ ]` to `[x]`.
 3. Commit with a descriptive message.
-4. Always push to GitHub immediately after committing (`git push`). Do not wait for the user to ask.
+4. Always open a Pull Request immediately after committing — create a new branch (e.g. `fix/<topic>` or `feat/<topic>`), push it, and run `gh pr create`. Never push directly to `main`. Do not wait for the user to ask.
 
 ## Coding Rules
 

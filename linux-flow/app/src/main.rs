@@ -44,6 +44,7 @@ fn acquire_instance_lock() -> Option<std::fs::File> {
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(path)
         .ok()?;
     // SAFETY: fd is valid; LOCK_EX|LOCK_NB is a valid flock(2) combination.
@@ -77,6 +78,7 @@ fn main() -> ExitCode {
     }
     let main_loop = glib::MainLoop::new(None, false);
     if let Err(e) = start_backend(&rt, &main_loop) {
+        eprintln!("linux-flow: {e}");
         tracing::error!("{e}");
         return ExitCode::FAILURE;
     }
