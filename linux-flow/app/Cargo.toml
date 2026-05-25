@@ -9,7 +9,9 @@ tokio = { version = "1", features = ["full"] }
 gtk4 = { version = "0.9", features = ["v4_12"] }
 libadwaita = { version = "0.7", features = ["v1_5"] }
 pipewire = "0.8"
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+rustls = "0.23"
+webpki-roots = "0.26"
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
 secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
 serde = { version = "1", features = ["derive"] }

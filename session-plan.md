@@ -57,7 +57,7 @@ daemon/Cargo.toml                ← يُعدَّل (wl-clipboard-rs, arboard)
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
+| **الحالة** | ✅ مكتملة |
 | **ملف التصميم** | `h06-persistent-websocket.md` |
 | **لوحدها أو مع غيرها؟** | **لوحدها** |
 | **السبب** | تُعيد هيكلة `asr.rs` بالكامل — كبيرة وحساسة |
@@ -152,9 +152,9 @@ app/src/hotkey_wayland.rs ← يُعدَّل (L-09: shortcuts_changed subscripti
 
 | # | الحالة | المهام | الملفات الرئيسية | وحدها؟ | شرط |
 |---|--------|--------|-----------------|--------|-----|
-| 1 | ⬜ | C-06 | `uinput_inner`, `paste_trigger`*, `wayland_vk`* | وحدها | — |
+| 1 | ✅ | C-06 | `uinput_inner`, `paste_trigger`*, `wayland_vk`* | وحدها | — |
 | 2 | ✅ | clipboard-fix + H-10 | `clipboard`, `uinput_inner`, `wayland_clipboard`* | وحدها | بعد 1 |
-| 3 | ⬜ | H-06 | `asr`, `pipeline` | وحدها | Soniox check |
+| 3 | ✅ | H-06 | `asr`, `pipeline` | وحدها | Soniox check |
 | 4 | ⬜ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
 | 5 | ⬜ | H-04 | `settings` | وحدها | — |
 | 6 | ⬜ | L-05 + L-06 | `hotkey_evdev` | معاً ⚠ | — |

@@ -9,6 +9,7 @@ SYSTEMD_USER="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 _TMPDIR=""
 _GROUPS_CHANGED=0
 _INSTALLED_FILES=()
+_IS_UPDATE=0
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +182,9 @@ start_service() {
     systemctl --user daemon-reload
     systemctl --user enable linux-flow.service
 
+    # Clear any previous failure count so StartLimitBurst doesn't block restart.
+    systemctl --user reset-failed linux-flow.service 2>/dev/null || true
+
     # Only start now if uinput group is active in the current login session.
     # If not active (group was just added, or user hasn't logged out yet),
     # linux-flow-helper would fail to open /dev/uinput and crash-loop every 2s.
@@ -189,6 +193,11 @@ start_service() {
     if [[ -n "$uinput_gid" ]] && id -G | tr ' ' '\n' | grep -qx "$uinput_gid"; then
         info "Starting linux-flow service..."
         systemctl --user start linux-flow.service
+        # Relaunch the app on update when a graphical session is available.
+        if [[ $_IS_UPDATE -eq 1 && -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+            nohup /usr/local/bin/linux-flow >/dev/null 2>&1 &
+            disown
+        fi
     else
         info "Service enabled. It will start automatically on your next login."
         [[ $_GROUPS_CHANGED -eq 1 ]] && info "Group membership updated — please log out and back in."
@@ -207,6 +216,7 @@ main() {
         printf '=> linux-flow is already installed. Update to the latest version? [y/n]: '
         read -r answer
         [[ "${answer,,}" != "y" ]] && { info "Aborted."; exit 0; }
+        _IS_UPDATE=1
         info "Stopping linux-flow service..."
         systemctl --user stop linux-flow.service 2>/dev/null || true
         pkill -TERM -x linux-flow        2>/dev/null || true
