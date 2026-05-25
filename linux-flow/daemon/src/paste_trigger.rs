@@ -14,11 +14,26 @@ pub enum PasteTrigger {
 impl PasteTrigger {
     pub fn new(display: DisplayServer) -> Self {
         match display {
-            DisplayServer::Wayland => VirtualKeyboard::new()
-                .map(PasteTrigger::Wayland)
-                .unwrap_or(PasteTrigger::Uinput),
-            DisplayServer::X11 => PasteTrigger::X11,
-            DisplayServer::Unknown => PasteTrigger::Uinput,
+            DisplayServer::Wayland => {
+                match VirtualKeyboard::new() {
+                    Some(vk) => {
+                        eprintln!("linux-flow-helper: paste trigger = wayland-vk");
+                        PasteTrigger::Wayland(vk)
+                    }
+                    None => {
+                        eprintln!("linux-flow-helper: paste trigger = uinput (wayland-vk unavailable)");
+                        PasteTrigger::Uinput
+                    }
+                }
+            }
+            DisplayServer::X11 => {
+                eprintln!("linux-flow-helper: paste trigger = xdotool");
+                PasteTrigger::X11
+            }
+            DisplayServer::Unknown => {
+                eprintln!("linux-flow-helper: paste trigger = uinput (display unknown)");
+                PasteTrigger::Uinput
+            }
         }
     }
 
