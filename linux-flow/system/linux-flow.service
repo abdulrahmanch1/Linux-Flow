@@ -7,7 +7,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 ExecStart=/usr/local/lib/linux-flow/linux-flow-helper
-PassEnvironment=WAYLAND_DISPLAY DISPLAY
+PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal
