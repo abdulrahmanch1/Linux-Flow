@@ -195,6 +195,15 @@
 
 ---
 
+## Phase 17 — Injection Reliability
+
+- [x] **TASK-44** — Fix layout-dependent paste failure (C-06): replace `uinput Ctrl+KEY_V` with `zwp_virtual_keyboard_v1` Wayland protocol.
+  - **Root cause:** `inject_via_clipboard` sent `KEY_LEFTCTRL + KEY_V` as evdev scancodes. With Arabic/non-Latin layout active, compositor XKB layer maps evdev 47 to the local keysym (`ر` not `v`); applications bind paste to keysym `v` (0x76) → silent no-op. Secondary issue: all uinput events arrive in the same OS scheduler quantum → compositor reads them as a batch, chord sometimes unrecognised.
+  - **Fix:** Daemon creates a `zwp_virtual_keyboard_v1` device with a daemon-owned XKB keymap (two keys: `<LCTL>=37`, `<AB04>=55`). Injected keysym is always `v` (0x76) regardless of user layout. Explicit wall-clock timestamps (12 ms gap) give the compositor real temporal separation. Fallback chain: Wayland VK → xdotool (X11) → KEY_PASTE (headless).
+  - **Files:** `daemon/src/wayland_vk.rs` (new), `daemon/src/paste_trigger.rs` (new), `daemon/src/uinput_inner.rs`, `daemon/src/uinput.rs`, `daemon/src/main.rs`, `daemon/Cargo.toml`, `install.sh`
+
+---
+
 ## Phase 16 — Distribution & Wizard Fix
 
 - [x] **TASK-43** — Fix broken polkit wizard step and missing system files.

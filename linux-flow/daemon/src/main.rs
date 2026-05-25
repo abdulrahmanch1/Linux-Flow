@@ -1,9 +1,11 @@
 mod clipboard;
 mod error;
 mod keys;
+mod paste_trigger;
 mod server;
 mod uinput;
 mod uinput_inner;
+mod wayland_vk;
 
 use std::sync::Arc;
 

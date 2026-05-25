@@ -117,23 +117,16 @@ impl Inner {
         &mut self,
         text: &str,
         display: DisplayServer,
+        trigger: &mut crate::paste_trigger::PasteTrigger,
     ) -> Result<(), DaemonError> {
+        // clipboard_write() blocks until the compositor's clipboard manager takes
+        // ownership — data is ready before this returns. The 80ms sleep lets the
+        // compositor flush internal state after wl-copy disconnects from the socket.
         clipboard::clipboard_write(display, text)?;
-        // Wait for wl-copy to connect to the Wayland display and register as
-        // clipboard owner before we send the paste shortcut.
-        thread::sleep(Duration::from_millis(50));
-        // Ctrl+V is universally handled by compositors and toolkits. KEY_PASTE
-        // (XF86Paste) is layout-independent but many compositors do not forward
-        // it to focused windows, causing a silent no-op. Ctrl+V is reliable.
-        self.key_event(keys::KEY_LEFTCTRL, true)?;
-        self.key_event(keys::KEY_V, true)?;
-        self.key_event(keys::KEY_V, false)?;
-        self.key_event(keys::KEY_LEFTCTRL, false)?;
-        // Clear the clipboard after a delay long enough for the paste to be
-        // consumed. With --paste-once wl-copy exits on its own after one paste;
-        // the clear here handles the case where no paste ever arrives.
+        thread::sleep(Duration::from_millis(80));
+        trigger.fire(self)?;
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(1000));
             clipboard::clipboard_clear(display);
         });
         Ok(())
