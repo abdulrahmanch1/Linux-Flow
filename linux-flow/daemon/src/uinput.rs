@@ -13,8 +13,7 @@ use std::{fs::OpenOptions, os::unix::io::AsRawFd, sync::Mutex, thread, time::Dur
 
 pub struct UinputInjector {
     inner: Mutex<Inner>,
-    display: clipboard::DisplayServer,
-    paste_trigger: Mutex<PasteTrigger>,
+    paste_trigger: Mutex<(clipboard::DisplayServer, PasteTrigger)>,
 }
 
 impl UinputInjector {
@@ -84,8 +83,7 @@ impl UinputInjector {
         let trigger = PasteTrigger::new(display);
         Ok(Self {
             inner: Mutex::new(Inner { fd }),
-            display,
-            paste_trigger: Mutex::new(trigger),
+            paste_trigger: Mutex::new((display, trigger)),
         })
     }
 }
@@ -96,11 +94,19 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        let mut trigger = self
+        let mut pt = self
             .paste_trigger
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        inner.inject_via_clipboard(text, self.display, &mut trigger)
+        // Re-detect on every call: cheap (env var + optional stat), and lets the
+        // trigger upgrade from Uinput to Wayland if the compositor became available
+        // after the daemon started (WAYLAND_DISPLAY was absent at startup).
+        let current = clipboard::detect_display();
+        if current != pt.0 {
+            pt.0 = current;
+            pt.1 = PasteTrigger::new(current);
+        }
+        inner.inject_via_clipboard(text, pt.0, &mut pt.1)
     }
 }
 
