@@ -2,9 +2,10 @@ use crate::{
     clipboard::{self, DisplayServer},
     error::DaemonError,
     keys,
+    wayland_clipboard::WaylandClipboard,
 };
 use libc::c_ulong;
-use std::{fs::File, io::Write, thread, time::Duration};
+use std::{fs::File, io::Write};
 
 pub const UI_DEV_CREATE: c_ulong = 0x5501;
 pub const UI_DEV_DESTROY: c_ulong = 0x5502;
@@ -117,18 +118,10 @@ impl Inner {
         &mut self,
         text: &str,
         display: DisplayServer,
+        wl: &WaylandClipboard,
         trigger: &mut crate::paste_trigger::PasteTrigger,
     ) -> Result<(), DaemonError> {
-        // clipboard_write() blocks until the compositor's clipboard manager takes
-        // ownership — data is ready before this returns. The 80ms sleep lets the
-        // compositor flush internal state after wl-copy disconnects from the socket.
-        clipboard::clipboard_write(display, text)?;
-        thread::sleep(Duration::from_millis(80));
-        trigger.fire(self)?;
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(1000));
-            clipboard::clipboard_clear(display);
-        });
-        Ok(())
+        clipboard::clipboard_write(display, text, wl)?;
+        trigger.fire(self)
     }
 }

@@ -32,7 +32,7 @@ daemon/Cargo.toml            ← يُعدَّل (wayland-client, wayland-protoco
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
+| **الحالة** | ✅ مكتملة |
 | **ملف التصميم** | `clipboard-latency-fix.md` |
 | **لوحدها أو مع غيرها؟** | **مع H-10** — H-10 يختفي تلقائياً في هاد الجلسة |
 | **السبب** | clipboard-latency-fix يحذف الـ deferred clear بالكامل فيحل H-10 بدون كود إضافي |
@@ -153,7 +153,7 @@ app/src/hotkey_wayland.rs ← يُعدَّل (L-09: shortcuts_changed subscripti
 | # | الحالة | المهام | الملفات الرئيسية | وحدها؟ | شرط |
 |---|--------|--------|-----------------|--------|-----|
 | 1 | ⬜ | C-06 | `uinput_inner`, `paste_trigger`*, `wayland_vk`* | وحدها | — |
-| 2 | ⬜ | clipboard-fix + H-10 | `clipboard`, `uinput_inner`, `wayland_clipboard`* | وحدها | بعد 1 |
+| 2 | ✅ | clipboard-fix + H-10 | `clipboard`, `uinput_inner`, `wayland_clipboard`* | وحدها | بعد 1 |
 | 3 | ⬜ | H-06 | `asr`, `pipeline` | وحدها | Soniox check |
 | 4 | ⬜ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
 | 5 | ⬜ | H-04 | `settings` | وحدها | — |

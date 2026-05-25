@@ -1,66 +1,40 @@
-use crate::error::DaemonError;
+use crate::{error::DaemonError, wayland_clipboard::WaylandClipboard};
 use linux_flow_shared::display::detect;
 pub use linux_flow_shared::display::DisplayServer;
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
+use zeroize::Zeroize;
 
 pub fn detect_display() -> DisplayServer {
     detect()
 }
 
-/// Writes `text` to the system clipboard using the appropriate tool.
-///
-/// Blocks until the clipboard tool exits. On compositors with a built-in
-/// clipboard manager (e.g. COSMIC) the manager takes ownership immediately
-/// and wl-copy exits. After this call returns, the data is in the manager
-/// and the subsequent Ctrl+V will paste it reliably without a race condition.
-pub fn clipboard_write(display: DisplayServer, text: &str) -> Result<(), DaemonError> {
+/// Writes `text` to the system clipboard using an in-process owner.
+/// Returns immediately — data is served from a background task on demand.
+pub fn clipboard_write(
+    display: DisplayServer,
+    text: &str,
+    wl: &WaylandClipboard,
+) -> Result<(), DaemonError> {
     match display {
-        DisplayServer::Wayland => pipe("wl-copy", &[], text),
-        DisplayServer::X11 => pipe("xclip", &["-selection", "clipboard"], text),
+        DisplayServer::Wayland => wl.set(text.to_string()),
+        DisplayServer::X11 => {
+            let mut owned = text.to_string();
+            tokio::task::spawn_blocking(move || {
+                let result = (|| {
+                    let mut cb = arboard::Clipboard::new().map_err(|e| {
+                        DaemonError::InjectionFailed(format!("arboard new: {e}"))
+                    })?;
+                    cb.set_text(owned.as_str()).map_err(|e| {
+                        DaemonError::InjectionFailed(format!("arboard set: {e}"))
+                    })?;
+                    Ok::<(), DaemonError>(())
+                })();
+                owned.zeroize();
+                // Keep alive so the clipboard selection remains valid until paste completes.
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                result
+            });
+            Ok(())
+        }
         DisplayServer::Unknown => Err(DaemonError::InjectionFailed("no display server".into())),
     }
-}
-
-/// Clears the system clipboard immediately after injection.
-pub fn clipboard_clear(display: DisplayServer) {
-    match display {
-        DisplayServer::Wayland => {
-            let _ = Command::new("wl-copy").arg("--clear").status();
-        }
-        DisplayServer::X11 => {
-            let _ = Command::new("xclip")
-                .args(["-selection", "clipboard"])
-                .stdin(Stdio::null())
-                .status();
-        }
-        DisplayServer::Unknown => {}
-    }
-}
-
-fn pipe(cmd: &str, args: &[&str], text: &str) -> Result<(), DaemonError> {
-    let mut child = Command::new(cmd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| DaemonError::InjectionFailed(format!("{cmd}: {e}")))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| DaemonError::InjectionFailed(format!("{cmd}: no stdin")))?;
-    stdin.write_all(text.as_bytes()).map_err(DaemonError::Io)?;
-    drop(stdin);
-    let status = child.wait().map_err(DaemonError::Io)?;
-    if !status.success() {
-        let code = status
-            .code()
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "killed by signal".into());
-        return Err(DaemonError::InjectionFailed(format!(
-            "{cmd} exited with code {code}"
-        )));
-    }
-    Ok(())
 }
