@@ -19,9 +19,8 @@ static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
 
 fn tls_connector() -> Connector {
     let config = TLS_CONFIG.get_or_init(|| {
-        let roots = RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         Arc::new(
             ClientConfig::builder()
                 .with_root_certificates(roots)
@@ -80,7 +79,7 @@ pub async fn transcribe(
     let connector = tls_connector();
     let (ws, _) = timeout(
         CONNECT_TIMEOUT,
-        connect_async_tls_with_config(SONIOX_URL, None, false, Some(connector)),
+        connect_async_tls_with_config(SONIOX_URL, None, true, Some(connector)),
     )
     .await
     .map_err(|_| AsrError::ConnectTimeout)?
@@ -121,7 +120,7 @@ pub async fn transcribe(
                 Err(e) => return Err(AsrError::WebSocket(e)),
             };
             let resp: SonioxResponse = serde_json::from_str(&text)?;
-            tracing::info!(
+            tracing::debug!(
                 "asr: msg error={} finished={} tokens={}",
                 resp.error_code,
                 resp.finished,
@@ -171,6 +170,5 @@ pub async fn transcribe(
             AsrError::StreamTimeout
         })?
         .map_err(|e| AsrError::Stream(e.to_string()))?;
-    drop(sink);
     result
 }
