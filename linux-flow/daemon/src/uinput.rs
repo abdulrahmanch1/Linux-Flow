@@ -7,14 +7,15 @@ use crate::{
         Inner, InputId, UinputSetup, ALL_KEYS, BUS_VIRTUAL, UI_DEV_CREATE, UI_DEV_DESTROY,
         UI_DEV_SETUP, UI_SET_EVBIT, UI_SET_KEYBIT,
     },
+    wayland_clipboard::WaylandClipboard,
 };
 use libc::c_int;
 use std::{fs::OpenOptions, os::unix::io::AsRawFd, sync::Mutex, thread, time::Duration};
 
 pub struct UinputInjector {
     inner: Mutex<Inner>,
-    display: clipboard::DisplayServer,
-    paste_trigger: Mutex<PasteTrigger>,
+    paste_trigger: Mutex<(clipboard::DisplayServer, PasteTrigger)>,
+    wl_clipboard: WaylandClipboard,
 }
 
 impl UinputInjector {
@@ -84,8 +85,8 @@ impl UinputInjector {
         let trigger = PasteTrigger::new(display);
         Ok(Self {
             inner: Mutex::new(Inner { fd }),
-            display,
-            paste_trigger: Mutex::new(trigger),
+            paste_trigger: Mutex::new((display, trigger)),
+            wl_clipboard: WaylandClipboard::new(),
         })
     }
 }
@@ -96,11 +97,19 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        let mut trigger = self
+        let mut pt = self
             .paste_trigger
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        inner.inject_via_clipboard(text, self.display, &mut trigger)
+        // Re-detect on every call: cheap (env var + optional stat), and lets the
+        // trigger upgrade from Uinput to Wayland if the compositor became available
+        // after the daemon started (WAYLAND_DISPLAY was absent at startup).
+        let current = clipboard::detect_display();
+        if current != pt.0 {
+            pt.0 = current;
+            pt.1 = PasteTrigger::new(current);
+        }
+        inner.inject_via_clipboard(text, pt.0, &self.wl_clipboard, &mut pt.1)
     }
 }
 

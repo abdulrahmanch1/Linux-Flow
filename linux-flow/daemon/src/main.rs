@@ -5,6 +5,7 @@ mod paste_trigger;
 mod server;
 mod uinput;
 mod uinput_inner;
+mod wayland_clipboard;
 mod wayland_vk;
 
 use std::sync::Arc;
