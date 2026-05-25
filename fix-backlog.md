@@ -69,6 +69,29 @@
 
 ---
 
+### [C-06] `Ctrl+KEY_V` via uinput is unreliable — intermittent paste failure confirmed in production
+- **Files:** `daemon/src/uinput_inner.rs:128–131`, `daemon/src/keys.rs`
+- **Confirmed in production:** User reports 30–50 % injection failure rate; daemon always returns `OK`; icon returns to Idle with no error — failure is silent.
+- **Root cause (two compounding issues):**
+
+  **Issue A — Non-Latin keyboard layout breaks the shortcut:**
+  `inject_via_clipboard` sends `KEY_LEFTCTRL + KEY_V` as physical evdev scancodes. COSMIC applies the active XKB layout on top: with Arabic layout active, physical KEY_V (code 47) maps to the Arabic keysym `ر`, not `v`. Applications (GTK, Qt) bind paste to `<Primary>v` (keysym 0x76 = 'v'), so the injected shortcut becomes `Ctrl+ر` — unrecognised → no paste. This is the primary cause for any user who switches to a non-Latin layout.
+
+  **Issue B — COSMIC epoll batching causes intermittent chord failure:**
+  `key_event()` writes `EV_KEY + EV_SYN` with zero inter-event delay. All four events (CTRL-dn, V-dn, V-up, CTRL-up) land in `/dev/uinput` within a single OS scheduler quantum. COSMIC's libinput handler wakes up once and reads all four frames as a batch — the EV_SYN boundaries carry no real-time separation. Under load COSMIC fails to recognise the Ctrl+V chord → silent no-op. Adding 12 ms delays between events (current workaround) reduces but does not eliminate the race.
+
+  **Previous attempt:** `KEY_PASTE` (0x161 / XF86Paste) was implemented as the fix for Issue A but reverted in commit `11bff59` because it produced the same intermittent failure — `KEY_PASTE` is also a physical scancode subject to the same epoll-batch race (Issue B).
+
+- **Correct fix:** Replace the entire uinput Ctrl+V block with the `zwlr_virtual_keyboard_v1` Wayland protocol. This protocol lets the daemon define its own XKB keymap (hardcoded US/English), making the injected keysym (`v` = 0x76) independent of the user's active layout. Events sent through `zwlr_virtual_keyboard_v1` are time-stamped by the daemon, giving the compositor real temporal separation between key frames. Both issues A and B are resolved in one change.
+  - Daemon connects to `$WAYLAND_DISPLAY` (already in environment via `PassEnvironment`)
+  - Creates `zwlr_virtual_keyboard_v1` with a minimal single-key US keymap
+  - Sends: `modifier(CTRL, pressed)` → `key(KEY_V, pressed, t+0)` → `key(KEY_V, released, t+12ms)` → `modifier(CTRL, released)`
+  - Dependency: `wayland-client` crate (already pulled in transitively or add directly)
+- **Note:** `clipboard_write()` (blocking wl-copy) remains unchanged — only the paste-trigger mechanism changes.
+- [x] **Status: Fixed** — `zwp_virtual_keyboard_v1` via `wayland-protocols-misc`; layout-independent keysym `v` from daemon-owned XKB keymap; explicit wall-clock timestamps eliminate epoll-batch race; X11 fallback via xdotool; uinput KEY_PASTE as last resort
+
+---
+
 ## 🟠 High — Security Vulnerability or Incorrect Behaviour
 
 ### [H-01] Unix socket inherits umask — world-readable by default
@@ -197,7 +220,32 @@
   For Path 1 (inject_latin_char), the correct fix is to route ALL text through the clipboard path and drop the keycode-per-character approach entirely. The keycode path is inherently layout-dependent and cannot be made layout-neutral without access to the compositor's XKB state.
 
 - **Impact:** Any user with a non-Latin keyboard layout cannot use the app at all. This includes all Arabic, Hindi, Persian, Kurdish users — the primary multilingual audience for a dictation tool.
-- [x] **Status: Fixed** — `inject_latin_char` removed; all text routed through clipboard; `KEY_PASTE` (0x161) replaces `Ctrl+V`; `keymap.rs` deleted
+- [ ] **Status: Regression** — KEY_PASTE was implemented then reverted in commit `11bff59` ("replace KEY_PASTE with Ctrl+V"). Backlog status was wrong. Current code still uses `KEY_LEFTCTRL + KEY_V` which fails with non-Latin layouts (Arabic, Persian, etc.) because the physical KEY_V produces a non-Latin keysym. Root cause of intermittent injection failures for Arabic-layout users.
+
+---
+
+### [H-10] Race condition — deferred clipboard clear wipes next injection's text
+- **File:** `daemon/src/uinput_inner.rs:138–141`
+- **Code:**
+  ```rust
+  thread::spawn(move || {
+      thread::sleep(Duration::from_millis(1000));
+      clipboard::clipboard_clear(display);
+  });
+  ```
+- **Problem:** A background thread is spawned to clear the clipboard 1000 ms after each injection. If the user dictates again before that 1000 ms elapses, the sequence is:
+  1. Injection 1 writes text A → triggers paste → spawns clear timer (t+1000 ms)
+  2. Injection 2 writes text B to clipboard
+  3. Clear timer from Injection 1 fires → **wipes text B before paste** → silent no-op
+  The daemon returns `OK` and the icon shows Idle, but nothing was pasted.
+- **Conditions:** Requires two dictations within ~1000 ms of each other. Unlikely in normal use (ASR+LLM adds ~400–600 ms per session), but possible with very short utterances or fast consecutive dictations.
+- **Fix:** Replace the fire-and-forget `thread::spawn` with a cancellable timer. Track the previous timer handle and cancel it when a new injection begins:
+  ```rust
+  // Store an AbortHandle or use a tokio CancellationToken shared across calls.
+  // On new injection: cancel previous token, create new one, schedule clear.
+  ```
+- **Note:** This issue disappears entirely if `clipboard-latency-fix` (wl-clipboard-rs) is implemented — the in-process clipboard owner never needs a deferred clear because it controls exactly when data is released.
+- [ ] **Status: Open** — discovered during code review; not previously tracked
 
 ---
 
@@ -407,21 +455,34 @@
 
 ---
 
+### [L-11] New Unix socket connection opened for every injection
+- **File:** `app/src/inject.rs:15`
+- **Code:** `let mut stream = timeout(IPC_TIMEOUT, UnixStream::connect(&path)).await...`
+- **Problem:** `inject_text` opens a fresh `UnixStream` on every call and drops it when the function returns. Unix socket connection is fast (< 1 ms) but the repeated connect/drop cycle is unnecessary overhead and adds minor allocations on every injection.
+- **Fix:** Hold a persistent `UnixStream` in the `Pipeline` struct. Reconnect only on `Err`. Pass it into `inject_text` or wrap it in a lightweight connection-manager. This matches how `LlmClient` (reqwest) handles its HTTP connection pool — created once at startup, reused across sessions.
+- **Note:** Low priority — the overhead is sub-millisecond and not user-visible. Implement alongside another pipeline refactor to avoid a standalone session for a minor gain.
+- [ ] **Status: Open** — discovered during code review; not previously tracked
+
+---
+
 ## Summary
 
 | Severity | Total | Fixed | Partial | Open |
 |----------|------:|------:|--------:|-----:|
-| 🔴 Critical | 5 | 5 | 0 | 0 |
-| 🟠 High | 9 | 6 | 1 | 2 |
+| 🔴 Critical | 6 | 5 | 0 | 1 |
+| 🟠 High | 10 | 5 | 1 | 4 |
 | 🟡 Medium | 10 | 10 | 0 | 0 |
-| 🔵 Low | 10 | 6 | 0 | 4 |
-| **Total** | **34** | **27** | **1** | **6** |
+| 🔵 Low | 11 | 6 | 0 | 5 |
+| **Total** | **37** | **27** | **1** | **9** |
 
 ### Open items requiring dedicated sessions
-- **H-06** Persistent WebSocket to Soniox — significant redesign of `asr.rs`
+- **C-06** Layout-independent injection — design: `c06-injection-fix.md`
+- **H-06** Persistent WebSocket to Soniox — design: `h06-persistent-websocket.md`
 - **H-07** inotify config watch — needs `inotify`/`notify` crate dependency
+- **H-10** Clipboard clear race condition — cancellable timer; resolves automatically with `clipboard-latency-fix`
 - **H-04** (partial) — keychain save errors still silent
 - **L-02** X11 hotkey thread stop — `XNextEvent` is blocking; channel closure provides partial coverage
 - **L-05** Keyboard hotplug — needs inotify on `/dev/input/`
 - **L-06** Keyboard disconnect retry — moderate complexity
 - **L-09** Runtime shortcut detection — depends on ashpd API version
+- **L-11** Persistent IPC connection — low priority; combine with pipeline refactor

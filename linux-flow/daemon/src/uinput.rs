@@ -1,6 +1,7 @@
 use crate::{
     clipboard,
     error::DaemonError,
+    paste_trigger::PasteTrigger,
     server::KeyInjector,
     uinput_inner::{
         Inner, InputId, UinputSetup, ALL_KEYS, BUS_VIRTUAL, UI_DEV_CREATE, UI_DEV_DESTROY,
@@ -13,6 +14,7 @@ use std::{fs::OpenOptions, os::unix::io::AsRawFd, sync::Mutex, thread, time::Dur
 pub struct UinputInjector {
     inner: Mutex<Inner>,
     display: clipboard::DisplayServer,
+    paste_trigger: Mutex<PasteTrigger>,
 }
 
 impl UinputInjector {
@@ -78,9 +80,12 @@ impl UinputInjector {
         }
 
         thread::sleep(Duration::from_millis(20));
+        let display = clipboard::detect_display();
+        let trigger = PasteTrigger::new(display);
         Ok(Self {
             inner: Mutex::new(Inner { fd }),
-            display: clipboard::detect_display(),
+            display,
+            paste_trigger: Mutex::new(trigger),
         })
     }
 }
@@ -91,7 +96,11 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        inner.inject_via_clipboard(text, self.display)
+        let mut trigger = self
+            .paste_trigger
+            .lock()
+            .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
+        inner.inject_via_clipboard(text, self.display, &mut trigger)
     }
 }
 

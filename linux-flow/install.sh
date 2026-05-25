@@ -145,7 +145,14 @@ pkg_install_distro() {
 ensure_tools() {
     command -v wl-copy     >/dev/null 2>&1 || pkg_install wl-clipboard
     command -v xclip       >/dev/null 2>&1 || pkg_install xclip
+    command -v xdotool     >/dev/null 2>&1 || pkg_install xdotool
     command -v notify-send >/dev/null 2>&1 || pkg_install_distro "notify-send" libnotify-bin libnotify libnotify
+    # GNOME Shell needs the AppIndicator extension to display StatusNotifierItem tray icons.
+    # Without it the app runs but its icon is invisible.
+    if command -v gnome-shell >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+        dpkg -s gnome-shell-extension-appindicator &>/dev/null \
+            || pkg_install gnome-shell-extension-appindicator
+    fi
 }
 
 ensure_build_deps() {
