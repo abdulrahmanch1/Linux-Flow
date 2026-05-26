@@ -6,7 +6,7 @@ use crate::{
     llm::{LlmClient, LlmError},
     secrets,
 };
-use linux_flow_shared::config::Config;
+use linux_flow_shared::{config::Config, display::DisplayServer};
 use notify::{RecursiveMode, Watcher};
 use std::time::Duration;
 use thiserror::Error;
@@ -39,6 +39,7 @@ async fn send_event(tx: &mpsc::Sender<PipelineEvent>, event: PipelineEvent) {
 
 pub struct Pipeline {
     config: Config,
+    display: DisplayServer,
     llm: LlmClient,
     soniox_key: Zeroizing<String>,
     or_key: Zeroizing<String>,
@@ -73,6 +74,7 @@ impl Pipeline {
         })();
         Ok(Self {
             config,
+            display: linux_flow_shared::display::detect(),
             llm,
             soniox_key,
             or_key,
@@ -87,6 +89,18 @@ impl Pipeline {
             if !matches!(hotkey.next().await, Some(HotkeyEvent::Pressed)) {
                 break;
             }
+
+            let focused_win: Option<u64> = if self.display == DisplayServer::X11 {
+                tokio::process::Command::new("xdotool")
+                    .arg("getactivewindow")
+                    .output()
+                    .await
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+            } else {
+                None
+            };
 
             while let Ok(fresh) = self.config_rx.try_recv() {
                 self.config = fresh;
@@ -269,6 +283,15 @@ impl Pipeline {
             }
 
             tracing::info!("pipeline: inject start");
+            if let Some(win) = focused_win {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    tokio::process::Command::new("xdotool")
+                        .args(["windowfocus", "--sync", &win.to_string()])
+                        .status(),
+                )
+                .await;
+            }
             match self.ipc.inject_text(text.as_str()).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
