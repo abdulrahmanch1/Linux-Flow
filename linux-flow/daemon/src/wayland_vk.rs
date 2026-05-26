@@ -1,4 +1,4 @@
-use std::{io::Write, os::fd::AsFd, time::{SystemTime, UNIX_EPOCH}};
+use std::{io::Write, os::fd::AsFd};
 use wayland_client::{
     protocol::{wl_registry, wl_seat},
     Connection, Dispatch, EventQueue, QueueHandle,
@@ -84,10 +84,10 @@ fn keymap_fd() -> Result<std::fs::File, DaemonError> {
 }
 
 fn now_ms() -> u32 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u32)
-        .unwrap_or(0)
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: ts is stack-allocated and valid; CLOCK_MONOTONIC never fails on Linux.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    ((ts.tv_sec as u64 * 1_000) + (ts.tv_nsec as u64 / 1_000_000)) as u32
 }
 
 impl VirtualKeyboard {
