@@ -11,7 +11,7 @@ use crate::error::DaemonError;
 
 const EVDEV_V: u32 = 47;   // Linux KEY_V
 const MOD_CTRL: u32 = 4;   // XKB Control modifier bitmask (index 2)
-const GAP_MS: u32 = 12;    // timestamp delta between key-down and key-up
+const GAP_MS: u32 = 20;    // timestamp delta between key-down and key-up (> 15ms browser threshold)
 const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
