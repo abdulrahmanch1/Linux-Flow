@@ -114,7 +114,7 @@ app/src/settings.rs  ← يُعدَّل (keychain error → toast)
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
+| **الحالة** | ✅ مكتملة |
 | **ملف التصميم** | لا يوجد |
 | **لوحدها أو مع غيرها؟** | **معاً إلزامياً** |
 | **السبب** | كلاهما في `hotkey_evdev.rs` — hotplug و disconnect وجهان لنفس المشكلة |
@@ -157,7 +157,7 @@ app/src/hotkey_wayland.rs ← يُعدَّل (L-09: shortcuts_changed subscripti
 | 3 | ✅ | H-06 | `asr`, `pipeline` | وحدها | Soniox check |
 | 4 | ✅ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
 | 5 | ✅ | H-04 | `settings` | وحدها | — |
-| 6 | ⬜ | L-05 + L-06 | `hotkey_evdev` | معاً ⚠ | — |
+| 6 | ✅ | L-05 + L-06 | `hotkey_evdev` | معاً ⚠ | — |
 | 7 | ⬜ | L-02 + L-09 | `hotkey`, `hotkey_x11`, `hotkey_wayland` | مُفضَّل | — |
 
 `*` ملف جديد
