@@ -76,8 +76,8 @@ app/Cargo.toml       ← يُعدَّل (rustls إذا اخترنا Option B)
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
-| **ملف التصميم** | لا يوجد بعد |
+| **الحالة** | ✅ مكتملة |
+| **ملف التصميم** | لا يوجد |
 | **لوحدها أو مع غيرها؟** | **معاً إلزامياً** |
 | **السبب** | كلاهما يُعدّل `pipeline.rs` — لو نُفّذا في جلستين منفصلتين حصل merge conflict |
 | **شرط** | بعد جلسة 3 لأن H-06 أيضاً يُعدّل `pipeline.rs` |
@@ -99,7 +99,7 @@ app/Cargo.toml       ← يُعدَّل (notify crate لـ inotify)
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
+| **الحالة** | ✅ مكتملة |
 | **ملف التصميم** | لا يوجد |
 | **لوحدها أو مع غيرها؟** | **لوحدها** (صغيرة) |
 
@@ -155,8 +155,8 @@ app/src/hotkey_wayland.rs ← يُعدَّل (L-09: shortcuts_changed subscripti
 | 1 | ✅ | C-06 | `uinput_inner`, `paste_trigger`*, `wayland_vk`* | وحدها | — |
 | 2 | ✅ | clipboard-fix + H-10 | `clipboard`, `uinput_inner`, `wayland_clipboard`* | وحدها | بعد 1 |
 | 3 | ✅ | H-06 | `asr`, `pipeline` | وحدها | Soniox check |
-| 4 | ⬜ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
-| 5 | ⬜ | H-04 | `settings` | وحدها | — |
+| 4 | ✅ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
+| 5 | ✅ | H-04 | `settings` | وحدها | — |
 | 6 | ⬜ | L-05 + L-06 | `hotkey_evdev` | معاً ⚠ | — |
 | 7 | ⬜ | L-02 + L-09 | `hotkey`, `hotkey_x11`, `hotkey_wayland` | مُفضَّل | — |
 

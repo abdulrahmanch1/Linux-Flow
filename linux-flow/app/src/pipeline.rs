@@ -2,11 +2,12 @@ use crate::{
     asr::{self, AsrError},
     audio::AudioCapture,
     hotkey::{HotkeyEvent, HotkeyManager},
-    inject::inject_text,
+    inject::IpcClient,
     llm::{LlmClient, LlmError},
     secrets,
 };
 use linux_flow_shared::config::Config;
+use notify::{RecursiveMode, Watcher};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -41,6 +42,9 @@ pub struct Pipeline {
     llm: LlmClient,
     soniox_key: Zeroizing<String>,
     or_key: Zeroizing<String>,
+    ipc: IpcClient,
+    config_rx: std::sync::mpsc::Receiver<Config>,
+    _config_watcher: Option<notify::RecommendedWatcher>,
 }
 
 impl Pipeline {
@@ -52,11 +56,29 @@ impl Pipeline {
         let or_key = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
             .await
             .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
+        let ipc = IpcClient::new();
+        let (config_tx, config_rx) = std::sync::mpsc::channel::<Config>();
+        let _config_watcher: Option<notify::RecommendedWatcher> = (|| {
+            let path = Config::config_path().ok()?;
+            let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if res.is_ok() {
+                    if let Ok(fresh) = Config::load() {
+                        let _ = config_tx.send(fresh);
+                    }
+                }
+            })
+            .ok()?;
+            w.watch(&path, RecursiveMode::NonRecursive).ok()?;
+            Some(w)
+        })();
         Ok(Self {
             config,
             llm,
             soniox_key,
             or_key,
+            ipc,
+            config_rx,
+            _config_watcher,
         })
     }
 
@@ -66,7 +88,9 @@ impl Pipeline {
                 break;
             }
 
-            let config_task = tokio::task::spawn_blocking(Config::load);
+            while let Ok(fresh) = self.config_rx.try_recv() {
+                self.config = fresh;
+            }
             let mut audio = AudioCapture::new();
             let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
                 Ok(triple) => triple,
@@ -76,9 +100,6 @@ impl Pipeline {
                     continue;
                 }
             };
-            if let Ok(Ok(fresh)) = config_task.await {
-                self.config = fresh;
-            }
             if !matches!(
                 tokio::time::timeout(Duration::from_secs(2), ready_rx).await,
                 Ok(Ok(()))
@@ -112,6 +133,7 @@ impl Pipeline {
             // the thread is not on the hot path.
             tokio::task::spawn_blocking(move || audio.stop());
             tracing::info!("pipeline: audio stop requested");
+            self.ipc.ensure_connected().await.ok();
             if !released {
                 asr.abort();
                 send_event(
@@ -247,7 +269,7 @@ impl Pipeline {
             }
 
             tracing::info!("pipeline: inject start");
-            match inject_text(text.as_str()).await {
+            match self.ipc.inject_text(text.as_str()).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");
