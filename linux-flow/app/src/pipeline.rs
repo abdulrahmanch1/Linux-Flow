@@ -90,17 +90,23 @@ impl Pipeline {
                 break;
             }
 
-            let focused_win: Option<u64> = if self.display == DisplayServer::X11 {
-                tokio::process::Command::new("xdotool")
-                    .arg("getactivewindow")
-                    .output()
-                    .await
-                    .ok()
-                    .and_then(|o| String::from_utf8(o.stdout).ok())
-                    .and_then(|s| s.trim().parse::<u64>().ok())
-            } else {
-                None
-            };
+            // `getwindowfocus` uses XGetInputFocus — works for XWayland apps on
+            // GNOME Wayland where `getactivewindow` (_NET_ACTIVE_WINDOW) fails.
+            let focused_win: Option<u64> =
+                if self.display == DisplayServer::X11
+                    || std::env::var_os("DISPLAY").is_some()
+                {
+                    tokio::process::Command::new("xdotool")
+                        .arg("getwindowfocus")
+                        .output()
+                        .await
+                        .ok()
+                        .and_then(|o| String::from_utf8(o.stdout).ok())
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .filter(|&id| id > 1) // exclude root window (id=1)
+                } else {
+                    None
+                };
 
             while let Ok(fresh) = self.config_rx.try_recv() {
                 self.config = fresh;

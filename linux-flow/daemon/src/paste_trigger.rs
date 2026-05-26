@@ -21,8 +21,17 @@ impl PasteTrigger {
                         PasteTrigger::Wayland(vk)
                     }
                     None => {
-                        eprintln!("linux-flow-helper: paste trigger = uinput (wayland-vk unavailable)");
-                        PasteTrigger::Uinput
+                        // zwp_virtual_keyboard_v1 unavailable (common on GNOME).
+                        // If XWayland is running ($DISPLAY set), xdotool can reach
+                        // XWayland-hosted apps via XGetInputFocus — use that instead
+                        // of uinput which browsers universally ignore.
+                        if std::env::var_os("DISPLAY").is_some() {
+                            eprintln!("linux-flow-helper: paste trigger = xdotool (wayland-vk unavailable, XWayland detected)");
+                            PasteTrigger::X11
+                        } else {
+                            eprintln!("linux-flow-helper: paste trigger = uinput (last-resort, no XWayland)");
+                            PasteTrigger::Uinput
+                        }
                     }
                 }
             }
