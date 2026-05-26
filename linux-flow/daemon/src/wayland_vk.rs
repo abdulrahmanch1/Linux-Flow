@@ -123,7 +123,7 @@ impl VirtualKeyboard {
         let t = now_ms();
         self.keyboard.modifiers(MOD_CTRL, 0, 0, 0);
         self.keyboard.key(t, EVDEV_V, KEY_PRESSED);
-        self.keyboard.key(t + GAP_MS, EVDEV_V, KEY_RELEASED);
+        self.keyboard.key(t.wrapping_add(GAP_MS), EVDEV_V, KEY_RELEASED);
         self.keyboard.modifiers(0, 0, 0, 0);
         self.conn
             .flush()

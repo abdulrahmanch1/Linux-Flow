@@ -123,6 +123,9 @@ impl Inner {
         x11_window: Option<u64>,
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text, wl)?;
+        // wl_clipboard_rs forks a child process to own the Wayland selection; give it
+        // time to register with the compositor before Ctrl+V arrives (typ. < 2 ms, 5 ms is safe).
+        std::thread::sleep(std::time::Duration::from_millis(5));
         trigger.fire(self, x11_window)
     }
 }
