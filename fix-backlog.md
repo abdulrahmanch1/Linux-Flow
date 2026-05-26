@@ -169,7 +169,7 @@
 - **Code:** `if let Ok(fresh) = Config::load() { self.config = fresh; }`
 - **Problem:** `fs::read_to_string` + `toml::from_str` are synchronous and run inside a tokio task at every hotkey press, blocking the async thread.
 - **Fix:** Watch the config file with `inotify` and update `self.config` only when the file actually changes.
-- [ ] **Status: Open**
+- [x] **Status: Fixed** — `notify` crate (inotify on Linux); watcher runs in background thread, sends `Config` over std channel only on file change; pipeline loop calls `try_recv()` — zero I/O on the hot path
 
 ---
 
@@ -461,7 +461,7 @@
 - **Problem:** `inject_text` opens a fresh `UnixStream` on every call and drops it when the function returns. Unix socket connection is fast (< 1 ms) but the repeated connect/drop cycle is unnecessary overhead and adds minor allocations on every injection.
 - **Fix:** Hold a persistent `UnixStream` in the `Pipeline` struct. Reconnect only on `Err`. Pass it into `inject_text` or wrap it in a lightweight connection-manager. This matches how `LlmClient` (reqwest) handles its HTTP connection pool — created once at startup, reused across sessions.
 - **Note:** Low priority — the overhead is sub-millisecond and not user-visible. Implement alongside another pipeline refactor to avoid a standalone session for a minor gain.
-- [ ] **Status: Open** — discovered during code review; not previously tracked
+- [x] **Status: Fixed** — `IpcClient` struct holds a persistent `UnixStream`; reconnects transparently on broken pipe (daemon restart); `ensure_connected()` called after hotkey release to pre-connect during ASR wait, eliminating the connect syscall from the injection hot path
 
 ---
 
