@@ -1,6 +1,7 @@
 use gtk4::prelude::*;
 use libadwaita::{self as adw, prelude::*};
 use linux_flow_shared::config::Config;
+use std::{cell::Cell, rc::Rc, sync::mpsc};
 use zeroize::Zeroizing;
 
 pub fn build_settings() -> adw::PreferencesWindow {
@@ -9,18 +10,14 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let hotkey_row = adw::EntryRow::new();
     hotkey_row.set_title("Push-to-Talk Hotkey");
     hotkey_row.set_text(&cfg.general.hotkey);
-
     let lang_row = adw::EntryRow::new();
     lang_row.set_title("Language");
     lang_row.set_text(&cfg.soniox.language);
-
     let model_row = adw::EntryRow::new();
     model_row.set_title("Model");
     model_row.set_text(&cfg.llm.model);
-
     let soniox_key_row = adw::PasswordEntryRow::new();
     soniox_key_row.set_title("Soniox API Key");
-
     let openrouter_key_row = adw::PasswordEntryRow::new();
     openrouter_key_row.set_title("OpenRouter API Key");
 
@@ -76,15 +73,48 @@ pub fn build_settings() -> adw::PreferencesWindow {
                 win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
                 return;
             }
+            let (tx, rx) = mpsc::channel::<(&'static str, Result<(), String>)>();
+            let mut expected: u32 = 0;
+
             let soniox_v = Zeroizing::new(soniox_key_row.text().to_string());
             if !soniox_v.is_empty() {
-                spawn_save_key("soniox", soniox_v);
+                expected += 1;
+                spawn_save_key("soniox", "Soniox", soniox_v, tx.clone());
             }
             let or_v = Zeroizing::new(openrouter_key_row.text().to_string());
             if !or_v.is_empty() {
-                spawn_save_key("openrouter", or_v);
+                expected += 1;
+                spawn_save_key("openrouter", "OpenRouter", or_v, tx.clone());
             }
-            win.close();
+            drop(tx);
+            if expected == 0 { win.close(); return; }
+
+            let remaining = Rc::new(Cell::new(expected));
+            let win_c = win.clone();
+            gtk4::glib::timeout_add_local(
+                std::time::Duration::from_millis(50),
+                move || {
+                    loop {
+                        match rx.try_recv() {
+                            Ok((name, result)) => {
+                                remaining.set(remaining.get() - 1);
+                                if let Err(e) = result {
+                                    win_c.add_toast(adw::Toast::new(
+                                        &format!("Failed to save {name} key: {e}"),
+                                    ));
+                                }
+                            }
+                            Err(mpsc::TryRecvError::Empty) => break,
+                            Err(mpsc::TryRecvError::Disconnected) => { remaining.set(0); break; }
+                        }
+                    }
+                    if remaining.get() == 0 {
+                        win_c.close();
+                        return gtk4::glib::ControlFlow::Break;
+                    }
+                    gtk4::glib::ControlFlow::Continue
+                },
+            );
         }
     });
 
@@ -97,11 +127,21 @@ fn patch_config(update: impl FnOnce(&mut Config)) -> Result<(), String> {
     cfg.save().map_err(|e| e.to_string())
 }
 
-fn spawn_save_key(service: &'static str, value: Zeroizing<String>) {
+fn spawn_save_key(
+    service: &'static str,
+    label: &'static str,
+    value: Zeroizing<String>,
+    tx: mpsc::Sender<(&'static str, Result<(), String>)>,
+) {
     std::thread::spawn(move || {
-        let _ = tokio::runtime::Builder::new_current_thread()
+        let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map(|rt| rt.block_on(crate::secrets::store_key(service, &value)));
+            .map_err(|e| e.to_string())
+            .and_then(|rt| {
+                rt.block_on(crate::secrets::store_key(service, &value))
+                    .map_err(|e| e.to_string())
+            });
+        let _ = tx.send((label, result));
     });
 }
