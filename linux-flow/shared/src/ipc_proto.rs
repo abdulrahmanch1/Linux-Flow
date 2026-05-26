@@ -9,15 +9,18 @@ const MAX_PAYLOAD_BYTES: usize = 1024 * 1024; // 1 MB
 
 #[derive(Serialize, Deserialize)]
 pub enum IpcRequest {
-    InjectText { text: String },
+    InjectText { text: String, x11_window: Option<u64> },
 }
 
 impl std::fmt::Debug for IpcRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IpcRequest::InjectText { text } => {
-                write!(f, "InjectText {{ text: [REDACTED, {} bytes] }}", text.len())
-            }
+            IpcRequest::InjectText { text, x11_window } => write!(
+                f,
+                "InjectText {{ text: [REDACTED, {} bytes], x11_window: {:?} }}",
+                text.len(),
+                x11_window,
+            ),
         }
     }
 }

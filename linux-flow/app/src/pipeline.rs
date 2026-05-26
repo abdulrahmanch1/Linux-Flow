@@ -292,7 +292,7 @@ impl Pipeline {
                 )
                 .await;
             }
-            match self.ipc.inject_text(text.as_str()).await {
+            match self.ipc.inject_text(text.as_str(), focused_win).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");

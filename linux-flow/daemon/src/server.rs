@@ -16,7 +16,7 @@ use tokio::{
 use crate::error::DaemonError;
 
 pub trait KeyInjector: Send + Sync {
-    fn inject_text(&self, text: &str) -> Result<(), DaemonError>;
+    fn inject_text(&self, text: &str, x11_window: Option<u64>) -> Result<(), DaemonError>;
 }
 
 /// Returns the socket path for the current user.
@@ -118,10 +118,10 @@ async fn handle_connection(
     })??;
 
     let response = match ipc_proto::decode_frame(&payload) {
-        Ok(IpcRequest::InjectText { mut text }) => {
+        Ok(IpcRequest::InjectText { mut text, x11_window }) => {
             let inj = Arc::clone(&injector);
             let result = tokio::task::spawn_blocking(move || {
-                let r = inj.inject_text(&text);
+                let r = inj.inject_text(&text, x11_window);
                 text.zeroize();
                 r
             })

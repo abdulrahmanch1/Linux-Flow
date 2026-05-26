@@ -120,8 +120,9 @@ impl Inner {
         display: DisplayServer,
         wl: &WaylandClipboard,
         trigger: &mut crate::paste_trigger::PasteTrigger,
+        x11_window: Option<u64>,
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text, wl)?;
-        trigger.fire(self)
+        trigger.fire(self, x11_window)
     }
 }
