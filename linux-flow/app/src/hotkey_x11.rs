@@ -1,12 +1,15 @@
 use std::os::raw::c_int;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use tokio::sync::mpsc;
 use x11::xlib::{
     AnyModifier, GrabModeAsync, KeyPress, KeyPressMask, KeyRelease, KeyReleaseMask, XCloseDisplay,
-    XDefaultRootWindow, XErrorEvent, XEvent, XGrabKey, XNextEvent, XOpenDisplay, XSelectInput,
-    XSetErrorHandler, XSync, XUngrabKey,
+    XDefaultRootWindow, XErrorEvent, XEvent, XGrabKey, XNextEvent, XOpenDisplay, XPending,
+    XSelectInput, XSetErrorHandler, XSync, XUngrabKey,
 };
 
 static XGRAB_FAILED: AtomicBool = AtomicBool::new(false);
@@ -44,7 +47,11 @@ pub struct X11Backend;
 
 impl X11Backend {
     /// Blocks the calling thread. Must be spawned via `std::thread::spawn`.
-    pub fn run(tx: mpsc::Sender<HotkeyEvent>, hotkey: &str) -> Result<(), HotkeyError> {
+    pub fn run(
+        tx: mpsc::Sender<HotkeyEvent>,
+        hotkey: &str,
+        stop: Arc<AtomicBool>,
+    ) -> Result<(), HotkeyError> {
         // SAFETY: All X11 calls follow documented usage patterns;
         // return values are checked before dereferencing.
         let display = unsafe { XOpenDisplay(ptr::null()) };
@@ -79,7 +86,7 @@ impl X11Backend {
             return Err(crate::hotkey::HotkeyError::X11GrabFailed);
         }
 
-        let result = Self::event_loop(display, keycode, &tx);
+        let result = Self::event_loop(display, keycode, &tx, &stop);
 
         unsafe {
             XUngrabKey(display, keycode as c_int, AnyModifier, root);
@@ -93,10 +100,22 @@ impl X11Backend {
         display: *mut x11::xlib::Display,
         keycode: u8,
         tx: &mpsc::Sender<HotkeyEvent>,
+        stop: &AtomicBool,
     ) -> Result<(), HotkeyError> {
         let mut event: XEvent = unsafe { std::mem::zeroed() };
 
         loop {
+            if stop.load(Ordering::Relaxed) {
+                return Err(HotkeyError::StreamClosed);
+            }
+
+            // Poll so the stop flag is checked every ~50 ms instead of
+            // blocking indefinitely inside XNextEvent.
+            if unsafe { XPending(display) } == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                continue;
+            }
+
             let ret = unsafe { XNextEvent(display, &mut event) };
             if ret < 0 {
                 return Err(HotkeyError::X11Connect);

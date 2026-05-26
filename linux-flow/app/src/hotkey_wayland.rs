@@ -33,6 +33,7 @@ impl WaylandBackend {
 
         let mut activated = shortcuts.receive_activated().await?;
         let mut deactivated = shortcuts.receive_deactivated().await?;
+        let mut shortcuts_changed = shortcuts.receive_shortcuts_changed().await?;
 
         loop {
             tokio::select! {
@@ -52,6 +53,10 @@ impl WaylandBackend {
                         }
                     }
                     Some(_) => {}
+                    None => return Err(HotkeyError::StreamClosed),
+                },
+                ev = shortcuts_changed.next() => match ev {
+                    Some(_) => tracing::debug!("global shortcut bindings changed by compositor"),
                     None => return Err(HotkeyError::StreamClosed),
                 },
             }
