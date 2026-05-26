@@ -132,7 +132,7 @@ app/src/hotkey_evdev.rs  ← يُعدَّل (inotify للـ hotplug + reconnect 
 
 | | |
 |--|--|
-| **الحالة** | ⬜ مفتوحة |
+| **الحالة** | ✅ مكتملة |
 | **ملف التصميم** | لا يوجد |
 | **لوحدها أو مع غيرها؟** | **معاً مُفضَّل** |
 | **السبب** | كلاهما في ملفات hotkey منفصلة لكن لا تعارض — يوفران جلسة |
@@ -158,6 +158,6 @@ app/src/hotkey_wayland.rs ← يُعدَّل (L-09: shortcuts_changed subscripti
 | 4 | ✅ | H-07 + L-11 | `pipeline`, `inject` | معاً ⚠ | بعد 3 |
 | 5 | ✅ | H-04 | `settings` | وحدها | — |
 | 6 | ✅ | L-05 + L-06 | `hotkey_evdev` | معاً ⚠ | — |
-| 7 | ⬜ | L-02 + L-09 | `hotkey`, `hotkey_x11`, `hotkey_wayland` | مُفضَّل | — |
+| 7 | ✅ | L-02 + L-09 | `hotkey`, `hotkey_x11`, `hotkey_wayland` | مُفضَّل | — |
 
 `*` ملف جديد

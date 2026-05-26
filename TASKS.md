@@ -195,6 +195,17 @@
 
 ---
 
+## Phase 19 — Hotkey Stop-Flag & Shortcuts-Changed
+
+- [x] **TASK-46** — Fix X11 backend thread lingering after `HotkeyManager` is dropped (L-02) and missing `ShortcutsChanged` subscription in the Wayland backend (L-09).
+  - **Root cause (L-02):** `X11Backend::run()` loops on blocking `XNextEvent()`; when `HotkeyManager` is dropped there is no signal to the OS thread, so it hangs until the next key press. Additionally the thread has no way to exit on demand during reconfiguration.
+  - **Root cause (L-09):** `hotkey_wayland.rs` only subscribes to `Activated` and `Deactivated` signals. The XDG GlobalShortcuts portal also emits `ShortcutsChanged` when the compositor rebinds the shortcut; ignoring it means the app has no stream to detect session closure via that path.
+  - **Fix (L-02):** Add `Arc<AtomicBool>` stop-flag to `HotkeyManager`; implement `Drop` to set it. Pass the flag to `X11Backend::run()`. In `event_loop`, replace the blocking `XNextEvent` with a poll loop: call `XPending()` — if zero events, sleep 50 ms and re-check the stop flag; if events are pending, call `XNextEvent` and process normally.
+  - **Fix (L-09):** Subscribe to `shortcuts.receive_shortcuts_changed()` and add a third arm to the `tokio::select!` loop; log a debug message on change and return `Err(StreamClosed)` if the stream closes.
+  - **Files:** `app/src/hotkey.rs`, `app/src/hotkey_x11.rs`, `app/src/hotkey_wayland.rs`
+
+---
+
 ## Phase 18 — Evdev Hotplug & Disconnect Recovery
 
 - [x] **TASK-45** — Fix evdev backend ignoring keyboards plugged in after startup (L-05) and not recovering after keyboard disconnect (L-06).

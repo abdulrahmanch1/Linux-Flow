@@ -7,6 +7,11 @@ pub(crate) mod x11_backend;
 #[path = "hotkey_evdev.rs"]
 pub(crate) mod evdev_backend;
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use linux_flow_shared::display::{self, DisplayServer};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -39,6 +44,13 @@ pub enum HotkeyError {
 
 pub struct HotkeyManager {
     rx: mpsc::Receiver<HotkeyEvent>,
+    x11_stop: Arc<AtomicBool>,
+}
+
+impl Drop for HotkeyManager {
+    fn drop(&mut self) {
+        self.x11_stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl HotkeyManager {
@@ -46,6 +58,7 @@ impl HotkeyManager {
         // raw_tx is shared by all backends; dedup_tx is what the pipeline reads.
         let (raw_tx, raw_rx) = mpsc::channel::<HotkeyEvent>(8);
         let (dedup_tx, dedup_rx) = mpsc::channel::<HotkeyEvent>(4);
+        let x11_stop = Arc::new(AtomicBool::new(false));
 
         // Deduplicator: suppress consecutive identical events that arise when
         // multiple backends (e.g. X11 + evdev) are running simultaneously.
@@ -73,6 +86,7 @@ impl HotkeyManager {
         let hotkey = hotkey.to_owned();
         match display::detect() {
             DisplayServer::Wayland => {
+                let stop = Arc::clone(&x11_stop);
                 tokio::spawn(async move {
                     if let Err(e) =
                         wayland_backend::WaylandBackend::run(raw_tx.clone(), hotkey.clone()).await
@@ -81,8 +95,9 @@ impl HotkeyManager {
                         if std::env::var_os("DISPLAY").is_some() {
                             let tx = raw_tx.clone();
                             let hk = hotkey.clone();
+                            let s = Arc::clone(&stop);
                             std::thread::spawn(move || {
-                                if let Err(e) = x11_backend::X11Backend::run(tx, &hk) {
+                                if let Err(e) = x11_backend::X11Backend::run(tx, &hk, s) {
                                     tracing::warn!("x11 exited: {e}");
                                 }
                             });
@@ -94,13 +109,16 @@ impl HotkeyManager {
                 });
             }
             DisplayServer::X11 => {
+                let stop = Arc::clone(&x11_stop);
                 tokio::spawn(async move {
                     let tx = raw_tx.clone();
                     let hk = hotkey.clone();
-                    let result =
-                        tokio::task::spawn_blocking(move || x11_backend::X11Backend::run(tx, &hk))
-                            .await
-                            .unwrap_or_else(|_| Err(HotkeyError::StreamClosed));
+                    let s = Arc::clone(&stop);
+                    let result = tokio::task::spawn_blocking(move || {
+                        x11_backend::X11Backend::run(tx, &hk, s)
+                    })
+                    .await
+                    .unwrap_or_else(|_| Err(HotkeyError::StreamClosed));
                     if let Err(e) = result {
                         tracing::warn!("x11 exited: {e}, trying evdev fallback");
                         if let Err(e) = evdev_backend::EvdevBackend::run(raw_tx, &hotkey).await {
@@ -112,7 +130,10 @@ impl HotkeyManager {
             DisplayServer::Unknown => return Err(HotkeyError::NoDisplay),
         }
 
-        Ok(Self { rx: dedup_rx })
+        Ok(Self {
+            rx: dedup_rx,
+            x11_stop,
+        })
     }
 
     pub async fn next(&mut self) -> Option<HotkeyEvent> {
