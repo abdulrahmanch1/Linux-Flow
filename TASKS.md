@@ -195,6 +195,16 @@
 
 ---
 
+## Phase 18 — Evdev Hotplug & Disconnect Recovery
+
+- [x] **TASK-45** — Fix evdev backend ignoring keyboards plugged in after startup (L-05) and not recovering after keyboard disconnect (L-06).
+  - **Root cause (L-05):** `open_keyboards()` is called once at startup via `select_all()`; keyboards plugged in later are never opened.
+  - **Root cause (L-06):** Each `EventStream` is consumed by `select_all()`; when a device disconnects its stream ends, and once all streams are drained the merged stream returns `None`, causing `run()` to return `Err(StreamClosed)` with no retry.
+  - **Fix:** Replace the static `select_all` loop with a task-per-device architecture. Each device runs in its own `tokio::spawn(read_device(...))` task that exits silently on disconnect. A `spawn_blocking` inotify watcher (using the existing `notify` v6 crate) watches `/dev/input` for `EventKind::Create` events; when a new `eventX` appears it opens the device and spawns a new reader task. Reconnected devices are handled automatically by the same inotify path. The outer `run()` loops forever on a `tokio::select!` over key events and hotplug events, returning only when the caller's `tx` closes.
+  - **Files:** `app/src/hotkey_evdev.rs`
+
+---
+
 ## Phase 17 — Injection Reliability
 
 - [x] **TASK-44** — Fix layout-dependent paste failure (C-06): replace `uinput Ctrl+KEY_V` with `zwp_virtual_keyboard_v1` Wayland protocol.
