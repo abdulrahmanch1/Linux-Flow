@@ -124,8 +124,10 @@ impl Inner {
     ) -> Result<(), DaemonError> {
         clipboard::clipboard_write(display, text, wl)?;
         // wl_clipboard_rs forks a child process to own the Wayland selection; give it
-        // time to register with the compositor before Ctrl+V arrives (typ. < 2 ms, 5 ms is safe).
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        // time to register with the compositor before Ctrl+V arrives. On a loaded system
+        // the child's Wayland handshake can exceed 5 ms, causing Ctrl+V to read stale
+        // content. 20 ms stays well within the 200 ms injection budget.
+        std::thread::sleep(std::time::Duration::from_millis(20));
         trigger.fire(self, x11_window)
     }
 }

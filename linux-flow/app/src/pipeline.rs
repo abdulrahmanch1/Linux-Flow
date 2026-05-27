@@ -153,7 +153,9 @@ impl Pipeline {
             // the thread is not on the hot path.
             tokio::task::spawn_blocking(move || audio.stop());
             tracing::info!("pipeline: audio stop requested");
-            self.ipc.ensure_connected().await.ok();
+            if let Err(e) = self.ipc.ensure_connected().await {
+                tracing::warn!("pipeline: daemon pre-connect failed ({e}), will retry at inject time");
+            }
             if !released {
                 asr.abort();
                 send_event(
@@ -290,13 +292,19 @@ impl Pipeline {
 
             tracing::info!("pipeline: inject start");
             if let Some(win) = focused_win {
-                let _ = tokio::time::timeout(
+                match tokio::time::timeout(
                     Duration::from_secs(1),
                     tokio::process::Command::new("xdotool")
                         .args(["windowfocus", "--sync", &win.to_string()])
                         .status(),
                 )
-                .await;
+                .await
+                {
+                    Ok(Ok(s)) if s.success() => {}
+                    Ok(Ok(s)) => tracing::warn!("pipeline: windowfocus failed: exit={:?}", s.code()),
+                    Ok(Err(e)) => tracing::warn!("pipeline: windowfocus error: {e}"),
+                    Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
+                }
             }
             match self.ipc.inject_text(text.as_str(), focused_win).await {
                 Ok(()) => {
