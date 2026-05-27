@@ -5,7 +5,9 @@ use zeroize::Zeroize;
 
 /// How long to keep the X11 clipboard selection alive after `set_text()`.
 /// Must exceed the browser's clipboard-read round-trip (renderer→browser→X11).
-const X11_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(2);
+/// 5 s covers loaded systems and SSH X11 forwarding where the round-trip can
+/// exceed 2 s; losing the selection before paste causes a silent empty-paste.
+const X11_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub fn detect_display() -> DisplayServer {
     detect()

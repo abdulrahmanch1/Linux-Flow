@@ -84,10 +84,19 @@ fn keymap_fd() -> Result<std::fs::File, DaemonError> {
 }
 
 fn now_ms() -> u32 {
-    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-    // SAFETY: ts is stack-allocated and valid; CLOCK_MONOTONIC never fails on Linux.
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
-    ((ts.tv_sec as u64 * 1_000) + (ts.tv_nsec as u64 / 1_000_000)) as u32
+    use std::sync::OnceLock;
+    static EPOCH: OnceLock<u64> = OnceLock::new();
+    let abs_ms = {
+        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: ts is stack-allocated and valid; CLOCK_MONOTONIC never fails on Linux.
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        (ts.tv_sec as u64 * 1_000) + (ts.tv_nsec as u64 / 1_000_000)
+    };
+    // Anchor to the first call so the returned value starts near 0 regardless of
+    // system uptime. Without this, the cast to u32 overflows after ~49.7 days and
+    // produces timestamps compositors reject as out-of-order.
+    let epoch = *EPOCH.get_or_init(|| abs_ms);
+    (abs_ms.saturating_sub(epoch)) as u32
 }
 
 impl VirtualKeyboard {
