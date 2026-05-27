@@ -34,12 +34,15 @@ impl IpcClient {
 
     /// Injects `text` via the helper socket. Reconnects once if the stream is
     /// stale (e.g. daemon restarted between sessions).
-    pub async fn inject_text(&mut self, text: &str) -> Result<(), String> {
-        match self.do_inject(text).await {
+    ///
+    /// `x11_window` is the X11 window ID captured at hotkey press time. `Some`
+    /// means the target is XWayland/X11; `None` means Wayland-native.
+    pub async fn inject_text(&mut self, text: &str, x11_window: Option<u64>) -> Result<(), String> {
+        match self.do_inject(text, x11_window).await {
             Ok(()) => Ok(()),
             Err(e) => {
                 self.stream = None;
-                self.do_inject(text).await.map_err(|_| e)
+                self.do_inject(text, x11_window).await.map_err(|_| e)
             }
         }
     }
@@ -53,16 +56,17 @@ impl IpcClient {
         Ok(())
     }
 
-    async fn do_inject(&mut self, text: &str) -> Result<(), String> {
+    async fn do_inject(&mut self, text: &str, x11_window: Option<u64>) -> Result<(), String> {
         if self.stream.is_none() {
             self.connect().await?;
         }
 
         let mut ipc_req = IpcRequest::InjectText {
             text: text.to_owned(),
+            x11_window,
         };
         let mut frame = encode_frame(&ipc_req).map_err(|e| e.to_string())?;
-        let IpcRequest::InjectText { text: ref mut t } = ipc_req;
+        let IpcRequest::InjectText { text: ref mut t, .. } = ipc_req;
         t.zeroize();
 
         let stream = self

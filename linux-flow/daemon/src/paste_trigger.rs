@@ -21,8 +21,17 @@ impl PasteTrigger {
                         PasteTrigger::Wayland(vk)
                     }
                     None => {
-                        eprintln!("linux-flow-helper: paste trigger = uinput (wayland-vk unavailable)");
-                        PasteTrigger::Uinput
+                        // zwp_virtual_keyboard_v1 unavailable (common on GNOME).
+                        // If XWayland is running ($DISPLAY set), xdotool can reach
+                        // XWayland-hosted apps via XGetInputFocus — use that instead
+                        // of uinput which browsers universally ignore.
+                        if std::env::var_os("DISPLAY").is_some() {
+                            eprintln!("linux-flow-helper: paste trigger = xdotool (wayland-vk unavailable, XWayland detected)");
+                            PasteTrigger::X11
+                        } else {
+                            eprintln!("linux-flow-helper: paste trigger = uinput (last-resort, no XWayland)");
+                            PasteTrigger::Uinput
+                        }
                     }
                 }
             }
@@ -37,14 +46,41 @@ impl PasteTrigger {
         }
     }
 
-    pub fn fire(&mut self, inner: &mut Inner) -> Result<(), DaemonError> {
+    /// Fires the paste trigger for the given target window.
+    ///
+    /// `x11_window` identifies the X11/XWayland window captured at hotkey press.
+    /// When `Some(id)`, xdotool targets that window explicitly — reliable for
+    /// XWayland-hosted apps (Chrome, Firefox on GNOME Wayland). When `None`,
+    /// the target is Wayland-native and the virtual keyboard or uinput is used.
+    pub fn fire(&mut self, inner: &mut Inner, x11_window: Option<u64>) -> Result<(), DaemonError> {
         match self {
-            PasteTrigger::Wayland(vk) => vk.paste(),
+            PasteTrigger::Wayland(vk) => {
+                if let Some(id) = x11_window {
+                    // Target is an XWayland window — route through X11 directly.
+                    eprintln!("linux-flow-helper: paste trigger = xdotool (XWayland window {id})");
+                    let status = Command::new("/usr/bin/xdotool")
+                        .args(["key", "--window", &id.to_string(), "--clearmodifiers", "ctrl+v"])
+                        .status()
+                        .map_err(|e| DaemonError::InjectionFailed(format!("xdotool: {e}")))?;
+                    if status.success() {
+                        return Ok(());
+                    }
+                    // Window may have closed between press and inject; fall through to VK.
+                    eprintln!("linux-flow-helper: xdotool failed for window {id}, fallback to vk");
+                }
+                eprintln!("linux-flow-helper: paste trigger = wayland-vk");
+                vk.paste()
+            }
             PasteTrigger::X11 => {
-                // --clearmodifiers releases any active layout modifier before
-                // the event and restores it after, ensuring layout-independence.
-                let status = Command::new("/usr/bin/xdotool")
-                    .args(["key", "--clearmodifiers", "ctrl+v"])
+                // Use captured window ID when available for accuracy; otherwise
+                // let xdotool send to whatever window holds X11 input focus.
+                let mut cmd = Command::new("/usr/bin/xdotool");
+                if let Some(id) = x11_window {
+                    cmd.args(["key", "--window", &id.to_string(), "--clearmodifiers", "ctrl+v"]);
+                } else {
+                    cmd.args(["key", "--clearmodifiers", "ctrl+v"]);
+                }
+                let status = cmd
                     .status()
                     .map_err(|e| DaemonError::InjectionFailed(format!("xdotool: {e}")))?;
                 if !status.success() {
@@ -56,6 +92,7 @@ impl PasteTrigger {
                 Ok(())
             }
             PasteTrigger::Uinput => {
+                eprintln!("linux-flow-helper: paste trigger = uinput (last-resort, browsers may ignore)");
                 inner.key_event(keys::KEY_PASTE, true)?;
                 inner.key_event(keys::KEY_PASTE, false)
             }

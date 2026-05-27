@@ -92,7 +92,7 @@ impl UinputInjector {
 }
 
 impl KeyInjector for UinputInjector {
-    fn inject_text(&self, text: &str) -> Result<(), DaemonError> {
+    fn inject_text(&self, text: &str, x11_window: Option<u64>) -> Result<(), DaemonError> {
         let mut inner = self
             .inner
             .lock()
@@ -109,7 +109,7 @@ impl KeyInjector for UinputInjector {
             pt.0 = current;
             pt.1 = PasteTrigger::new(current);
         }
-        inner.inject_via_clipboard(text, pt.0, &self.wl_clipboard, &mut pt.1)
+        inner.inject_via_clipboard(text, pt.0, &self.wl_clipboard, &mut pt.1, x11_window)
     }
 }
 
