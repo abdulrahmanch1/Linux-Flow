@@ -217,7 +217,15 @@ impl Pipeline {
             let model =
                 std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
             tracing::info!("pipeline: llm start");
-            let llm_res = self.llm.rewrite(self.or_key.clone(), &model, &raw).await;
+            let llm_res = self
+                .llm
+                .rewrite(
+                    self.or_key.clone(),
+                    &model,
+                    &raw,
+                    self.config.llm.message_splitting,
+                )
+                .await;
             tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
             let (mut text, fallback) = match llm_res {
                 Ok(t) => (t, false),
@@ -306,7 +314,10 @@ impl Pipeline {
                     Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
                 }
             }
-            match self.ipc.inject_text(text.as_str(), focused_win).await {
+            // Strip trailing newlines/whitespace so a dangling break never lands
+            // as an Enter that submits the message or runs the command on its own.
+            let to_inject = text.trim_end_matches(['\n', '\r', ' ', '\t']);
+            match self.ipc.inject_text(to_inject, focused_win).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");
