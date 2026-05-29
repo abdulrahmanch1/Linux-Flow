@@ -8,9 +8,15 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
-/// Max distinct characters per keymap. evdev codes `1..=247` map to XKB
-/// keycodes `9..=255`, inside the `minimum=8; maximum=255` keycode range.
-pub const MAX_KEYS: usize = 247;
+/// Max distinct characters per keymap. evdev codes `1..=246` map to XKB
+/// keycodes `9..=254`; XKB keycode 255 (evdev [`WARMUP_EVDEV`]) is reserved
+/// for the warm-up key. All stay inside the `minimum=8; maximum=255` range.
+pub const MAX_KEYS: usize = 246;
+
+/// evdev keycode of the sacrificial warm-up key (XKB keycode 255). Mapped to
+/// `VoidSymbol` so it never produces output. Compositors frequently drop the
+/// first key event after a keymap change; firing this first absorbs that drop.
+pub const WARMUP_EVDEV: u32 = 247;
 
 /// XKB keysym token for a character. Control characters that must trigger real
 /// key behaviour use named keysyms; everything else uses the Unicode form
@@ -34,6 +40,9 @@ pub fn build_keymap(chars: &[char]) -> String {
         let _ = writeln!(codes, "    <K{i}>={};", i + 9);
         let _ = writeln!(symbols, "    key <K{i}>{{[{}]}};", keysym_token(c));
     }
+    // Warm-up key at XKB keycode 255 (evdev WARMUP_EVDEV), produces no output.
+    codes.push_str("    <KW>=255;\n");
+    symbols.push_str("    key <KW>{[VoidSymbol]};\n");
     let mut km = String::from("xkb_keymap {\n");
     km.push_str("  xkb_keycodes { minimum=8; maximum=255;\n");
     km.push_str(&codes);

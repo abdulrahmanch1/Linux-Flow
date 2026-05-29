@@ -155,6 +155,13 @@ impl VirtualKeyboard {
                 });
             }
             self.set_keymap(&keymap::build_keymap(&uniq))?;
+            // Sacrificial warm-up: compositors drop the first key event after a
+            // keymap change, which otherwise eats the segment's first character.
+            // This key maps to VoidSymbol, so it is harmless if not dropped.
+            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_PRESSED);
+            t = t.wrapping_add(self.gap_ms);
+            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_RELEASED);
+            t = t.wrapping_add(self.gap_ms);
             for &c in &seg {
                 if let Some(&code) = codes.get(&c) {
                     self.keyboard.key(t, code, KEY_PRESSED);
