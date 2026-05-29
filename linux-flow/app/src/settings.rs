@@ -17,8 +17,8 @@ pub fn build_settings() -> adw::PreferencesWindow {
     model_row.set_title("Model");
     model_row.set_text(&cfg.llm.model);
     let split_row = adw::SwitchRow::new();
-    split_row.set_title("Split into multiple messages");
-    split_row.set_subtitle("Let dictation break into chat-style lines. Off keeps one line (safer in terminals).");
+    split_row.set_title("Split into separate messages");
+    split_row.set_subtitle("Breaks your speech into separate lines at natural pauses and sends each as its own message in chat apps. Off keeps everything on one line — recommended for terminals and code editors.");
     split_row.set_active(cfg.llm.message_splitting);
     let soniox_key_row = adw::PasswordEntryRow::new();
     soniox_key_row.set_title("Soniox API Key");

@@ -314,9 +314,18 @@ impl Pipeline {
                     Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
                 }
             }
-            // Strip trailing newlines/whitespace so a dangling break never lands
-            // as an Enter that submits the message or runs the command on its own.
-            let to_inject = text.trim_end_matches(['\n', '\r', ' ', '\t']);
+            // Normalize the trailing break. Single-line mode strips any dangling
+            // newline so it never lands as a lone Enter (which would submit/run
+            // the text prematurely). Splitting mode appends exactly one newline so
+            // the final segment also sends, matching the earlier segments.
+            let trimmed = text.trim_end_matches(['\n', '\r', ' ', '\t']);
+            let with_break;
+            let to_inject = if self.config.llm.message_splitting {
+                with_break = Zeroizing::new(format!("{trimmed}\n"));
+                with_break.as_str()
+            } else {
+                trimmed
+            };
             match self.ipc.inject_text(to_inject, focused_win).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;

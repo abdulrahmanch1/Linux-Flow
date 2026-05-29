@@ -129,6 +129,10 @@ impl VirtualKeyboard {
         self.queue
             .roundtrip(&mut self.state)
             .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
+        // Initialize modifier state on the freshly-keymapped device. Without this,
+        // many compositors (COSMIC, Mutter) discard the very first key event of a
+        // new virtual keyboard, dropping the first typed character.
+        self.keyboard.modifiers(0, 0, 0, 0);
         drop(kfd); // compositor has dup'd the fd via SCM_RIGHTS
         Ok(())
     }
@@ -136,7 +140,8 @@ impl VirtualKeyboard {
     /// Types `text` into the focused window by generating, per run, a dynamic
     /// XKB keymap whose keys are the run's exact characters, then emitting a
     /// press/release pair per character. Layout-independent and Unicode-complete
-    /// (Arabic, emoji, CJK) — never touches the clipboard or modifiers.
+    /// (Arabic, emoji, CJK) — never touches the clipboard. Modifiers are only
+    /// reset to a known-empty state, never held.
     pub fn type_text(&mut self, text: &str) -> Result<(), DaemonError> {
         let mut t = now_ms();
         for seg in keymap::segments(text) {
