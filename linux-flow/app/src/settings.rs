@@ -16,6 +16,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let model_row = adw::EntryRow::new();
     model_row.set_title("Model");
     model_row.set_text(&cfg.llm.model);
+    let split_row = adw::SwitchRow::new();
+    split_row.set_title("Split into multiple messages");
+    split_row.set_subtitle("Let dictation break into chat-style lines. Off keeps one line (safer in terminals).");
+    split_row.set_active(cfg.llm.message_splitting);
     let soniox_key_row = adw::PasswordEntryRow::new();
     soniox_key_row.set_title("Soniox API Key");
     let openrouter_key_row = adw::PasswordEntryRow::new();
@@ -33,6 +37,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let llm_grp = adw::PreferencesGroup::new();
     llm_grp.set_title("Language Model");
     llm_grp.add(&model_row);
+    llm_grp.add(&split_row);
     llm_grp.add(&openrouter_key_row);
 
     let confirm_btn = gtk4::Button::with_label("Confirm");
@@ -69,6 +74,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
                 if !v.is_empty() {
                     c.llm.model = v;
                 }
+                c.llm.message_splitting = split_row.is_active();
             }) {
                 win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
                 return;
