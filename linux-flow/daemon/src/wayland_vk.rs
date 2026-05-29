@@ -7,29 +7,12 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1 as vk_mgr,
     zwp_virtual_keyboard_v1 as vk_proto,
 };
-use crate::error::DaemonError;
+use crate::{error::DaemonError, keymap};
 
-const EVDEV_V: u32 = 47;   // Linux KEY_V
-const MOD_CTRL: u32 = 4;   // XKB Control modifier bitmask (index 2)
-const GAP_MS: u32 = 20;    // timestamp delta between key-down and key-up (> 15ms browser threshold)
+const GAP_MS: u32 = 4;     // timestamp delta between successive key events
 const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
-
-// Minimal two-key XKB keymap. X11 keycode = evdev + 8: LCTL=37, V(AB04)=55.
-// The compositor applies this keymap only to events from this virtual device;
-// the user's active layout is unaffected. Null-terminated as required by
-// XKB_KEYMAP_FORMAT_TEXT_V1.
-const KEYMAP: &str = concat!(
-    "xkb_keymap {\n",
-    "  xkb_keycodes { minimum=8; maximum=255;\n",
-    "    <LCTL>=37; <AB04>=55; };\n",
-    "  xkb_types   { include \"complete\" };\n",
-    "  xkb_compat  { include \"complete\" };\n",
-    "  xkb_symbols { key <LCTL>{[Control_L]}; key <AB04>{[v,V]}; };\n",
-    "  xkb_geometry { };\n",
-    "};\n\0",
-);
 
 struct VkState {
     seat: Option<wl_seat::WlSeat>,
@@ -63,13 +46,14 @@ impl Dispatch<vk_proto::ZwpVirtualKeyboardV1, ()> for VkState {
 
 pub struct VirtualKeyboard {
     conn: Connection,
-    // Kept alive to maintain Wayland proxy lifetimes; not read after construction.
-    _queue: EventQueue<VkState>,
-    _state: VkState,
+    // Retained to roundtrip after each keymap upload so the compositor processes
+    // the new layout before the corresponding key events are flushed.
+    queue: EventQueue<VkState>,
+    state: VkState,
     keyboard: vk_proto::ZwpVirtualKeyboardV1,
 }
 
-fn keymap_fd() -> Result<std::fs::File, DaemonError> {
+fn keymap_fd(km: &str) -> Result<std::fs::File, DaemonError> {
     use std::os::unix::io::FromRawFd;
     let name = c"vk-keymap";
     // SAFETY: name is a valid C string literal; MFD_CLOEXEC is a documented flag.
@@ -79,7 +63,7 @@ fn keymap_fd() -> Result<std::fs::File, DaemonError> {
     }
     // SAFETY: raw is a valid fd returned by memfd_create.
     let mut f = unsafe { std::fs::File::from_raw_fd(raw) };
-    f.write_all(KEYMAP.as_bytes()).map_err(DaemonError::Io)?;
+    f.write_all(km.as_bytes()).map_err(DaemonError::Io)?;
     Ok(f)
 }
 
@@ -113,27 +97,51 @@ impl VirtualKeyboard {
 
         let seat = state.seat.take()?;
         let mgr = state.mgr.take()?;
-        let kfd = keymap_fd().ok()?;
-
         let keyboard = mgr.create_virtual_keyboard(&seat, &qh, ());
-        keyboard.keymap(XKB_V1, kfd.as_fd(), KEYMAP.len() as u32);
 
-        // Roundtrip ensures compositor processes keymap before first paste.
-        queue.roundtrip(&mut state).ok()?;
-
-        drop(kfd); // compositor has dup'd the fd via SCM_RIGHTS
-        Some(Self { conn, _queue: queue, _state: state, keyboard })
+        // The keymap is uploaded per text run (it carries that run's characters),
+        // so no initial keymap is set here.
+        Some(Self { conn, queue, state, keyboard })
     }
 
-    /// Injects a layout-independent Ctrl+V with explicit wall-clock timestamps.
-    /// The compositor uses our own XKB keymap so the injected keysym is always
-    /// `v` (0x76), regardless of the user's active keyboard layout.
-    pub fn paste(&mut self) -> Result<(), DaemonError> {
-        let t = now_ms();
-        self.keyboard.modifiers(MOD_CTRL, 0, 0, 0);
-        self.keyboard.key(t, EVDEV_V, KEY_PRESSED);
-        self.keyboard.key(t.wrapping_add(GAP_MS), EVDEV_V, KEY_RELEASED);
-        self.keyboard.modifiers(0, 0, 0, 0);
+    /// Uploads `km` as the active XKB keymap and blocks until the compositor has
+    /// processed it, so subsequent key events resolve against the new layout.
+    fn set_keymap(&mut self, km: &str) -> Result<(), DaemonError> {
+        let kfd = keymap_fd(km)?;
+        self.keyboard.keymap(XKB_V1, kfd.as_fd(), km.len() as u32);
+        self.queue
+            .roundtrip(&mut self.state)
+            .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
+        drop(kfd); // compositor has dup'd the fd via SCM_RIGHTS
+        Ok(())
+    }
+
+    /// Types `text` into the focused window by generating, per run, a dynamic
+    /// XKB keymap whose keys are the run's exact characters, then emitting a
+    /// press/release pair per character. Layout-independent and Unicode-complete
+    /// (Arabic, emoji, CJK) — never touches the clipboard or modifiers.
+    pub fn type_text(&mut self, text: &str) -> Result<(), DaemonError> {
+        let mut t = now_ms();
+        for seg in keymap::segments(text) {
+            // First-seen order assigns each distinct char an evdev keycode `1..`.
+            let mut codes: std::collections::HashMap<char, u32> = std::collections::HashMap::new();
+            let mut uniq: Vec<char> = Vec::new();
+            for &c in &seg {
+                codes.entry(c).or_insert_with(|| {
+                    uniq.push(c);
+                    uniq.len() as u32
+                });
+            }
+            self.set_keymap(&keymap::build_keymap(&uniq))?;
+            for &c in &seg {
+                if let Some(&code) = codes.get(&c) {
+                    self.keyboard.key(t, code, KEY_PRESSED);
+                    t = t.wrapping_add(GAP_MS);
+                    self.keyboard.key(t, code, KEY_RELEASED);
+                    t = t.wrapping_add(GAP_MS);
+                }
+            }
+        }
         self.conn
             .flush()
             .map_err(|e| DaemonError::InjectionFailed(format!("wayland flush: {e}")))?;
