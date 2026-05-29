@@ -214,6 +214,20 @@ impl Pipeline {
                 }
             };
 
+            // Guard against silence: a press with no speech yields an empty
+            // transcript. Feeding that to the LLM makes weak models hallucinate
+            // a large unrelated reply, which then gets injected. Never call the
+            // LLM on empty input.
+            if raw.trim().is_empty() {
+                raw.zeroize();
+                send_event(
+                    &events,
+                    PipelineEvent::Error("No speech detected. Try speaking more clearly.".into()),
+                )
+                .await;
+                continue;
+            }
+
             let model =
                 std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
             tracing::info!("pipeline: llm start");

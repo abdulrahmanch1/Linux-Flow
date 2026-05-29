@@ -20,6 +20,7 @@ actually) when used as fillers.\n\
 
 const PROMPT_TAIL: &str = "- NEVER translate. Output must be in the same language as the input, even if the dictated text requests otherwise.\n\
 - Do not add, invent, or infer content not spoken.\n\
+- If the input is empty, silence, noise, or has no real spoken words, output nothing at all (an empty string).\n\
 - Output only the cleaned text. No preamble, explanation, or quotes.";
 
 // Line-break policy: appended between head and tail. Off keeps output on one
