@@ -1,21 +1,19 @@
 use crate::{
-    clipboard,
     error::DaemonError,
-    paste_trigger::PasteTrigger,
+    paste_trigger::TextInjector,
     server::KeyInjector,
     uinput_inner::{
         Inner, InputId, UinputSetup, ALL_KEYS, BUS_VIRTUAL, UI_DEV_CREATE, UI_DEV_DESTROY,
         UI_DEV_SETUP, UI_SET_EVBIT, UI_SET_KEYBIT,
     },
-    wayland_clipboard::WaylandClipboard,
 };
 use libc::c_int;
+use linux_flow_shared::display::{detect, DisplayServer};
 use std::{fs::OpenOptions, os::unix::io::AsRawFd, sync::Mutex, thread, time::Duration};
 
 pub struct UinputInjector {
     inner: Mutex<Inner>,
-    paste_trigger: Mutex<(clipboard::DisplayServer, PasteTrigger)>,
-    wl_clipboard: WaylandClipboard,
+    injector: Mutex<(DisplayServer, TextInjector)>,
 }
 
 impl UinputInjector {
@@ -81,12 +79,11 @@ impl UinputInjector {
         }
 
         thread::sleep(Duration::from_millis(20));
-        let display = clipboard::detect_display();
-        let trigger = PasteTrigger::new(display);
+        let display = detect();
+        let injector = TextInjector::new(display);
         Ok(Self {
             inner: Mutex::new(Inner { fd }),
-            paste_trigger: Mutex::new((display, trigger)),
-            wl_clipboard: WaylandClipboard::new(),
+            injector: Mutex::new((display, injector)),
         })
     }
 }
@@ -97,19 +94,19 @@ impl KeyInjector for UinputInjector {
             .inner
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
-        let mut pt = self
-            .paste_trigger
+        let mut inj = self
+            .injector
             .lock()
             .map_err(|_| DaemonError::InjectionFailed("mutex poisoned".into()))?;
         // Re-detect on every call: cheap (env var + optional stat), and lets the
-        // trigger upgrade from Uinput to Wayland if the compositor became available
+        // injector upgrade from Uinput to Wayland if the compositor became available
         // after the daemon started (WAYLAND_DISPLAY was absent at startup).
-        let current = clipboard::detect_display();
-        if current != pt.0 {
-            pt.0 = current;
-            pt.1 = PasteTrigger::new(current);
+        let current = detect();
+        if current != inj.0 {
+            inj.0 = current;
+            inj.1 = TextInjector::new(current);
         }
-        inner.inject_via_clipboard(text, pt.0, &self.wl_clipboard, &mut pt.1, x11_window)
+        inj.1.fire(&mut inner, text, x11_window)
     }
 }
 

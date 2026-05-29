@@ -1,9 +1,4 @@
-use crate::{
-    clipboard::{self, DisplayServer},
-    error::DaemonError,
-    keys,
-    wayland_clipboard::WaylandClipboard,
-};
+use crate::{error::DaemonError, keys};
 use libc::c_ulong;
 use std::{fs::File, io::Write};
 
@@ -67,7 +62,6 @@ pub const ALL_KEYS: &[u16] = &[
     keys::KEY_SLASH,
     keys::KEY_BACKSLASH,
     keys::KEY_GRAVE,
-    keys::KEY_PASTE,
 ];
 
 #[repr(C)]
@@ -112,22 +106,5 @@ impl Inner {
     pub fn key_event(&mut self, code: u16, down: bool) -> Result<(), DaemonError> {
         self.write_event(keys::EV_KEY, code, if down { 1 } else { 0 })?;
         self.write_event(keys::EV_SYN, keys::SYN_REPORT, 0)
-    }
-
-    pub fn inject_via_clipboard(
-        &mut self,
-        text: &str,
-        display: DisplayServer,
-        wl: &WaylandClipboard,
-        trigger: &mut crate::paste_trigger::PasteTrigger,
-        x11_window: Option<u64>,
-    ) -> Result<(), DaemonError> {
-        clipboard::clipboard_write(display, text, wl)?;
-        // wl_clipboard_rs forks a child process to own the Wayland selection; give it
-        // time to register with the compositor before Ctrl+V arrives. On a loaded system
-        // the child's Wayland handshake can exceed 5 ms, causing Ctrl+V to read stale
-        // content. 20 ms stays well within the 200 ms injection budget.
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        trigger.fire(self, x11_window)
     }
 }
