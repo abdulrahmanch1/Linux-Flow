@@ -29,6 +29,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     general.set_title("General");
     general.add(&hotkey_row);
 
+    let dictation = adw::PreferencesGroup::new();
+    dictation.set_title("Dictation");
+    dictation.add(&split_row);
+
     let speech = adw::PreferencesGroup::new();
     speech.set_title("Speech Recognition");
     speech.add(&lang_row);
@@ -37,7 +41,6 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let llm_grp = adw::PreferencesGroup::new();
     llm_grp.set_title("Language Model");
     llm_grp.add(&model_row);
-    llm_grp.add(&split_row);
     llm_grp.add(&openrouter_key_row);
 
     let confirm_btn = gtk4::Button::with_label("Confirm");
@@ -49,6 +52,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
 
     let page = adw::PreferencesPage::new();
     page.add(&general);
+    page.add(&dictation);
     page.add(&speech);
     page.add(&llm_grp);
     page.add(&btn_grp);
