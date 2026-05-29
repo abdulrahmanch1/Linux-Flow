@@ -9,10 +9,26 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 };
 use crate::{error::DaemonError, keymap};
 
-const GAP_MS: u32 = 4;     // timestamp delta between successive key events
 const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
+
+/// Per-event timestamp delta (ms). Too small and compositors coalesce or drop
+/// rapid press/release pairs, dropping characters; too large and long text
+/// types slowly. Calibrated per compositor via [`detect_gap`].
+fn detect_gap() -> u32 {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if desktop.contains("cosmic") {
+        8 // smithay/cosmic-comp coalesces aggressively
+    } else if desktop.contains("gnome") {
+        6 // Mutter
+    } else {
+        4 // KDE/KWin, wlroots, and unknown — tolerate fast input
+    }
+}
 
 struct VkState {
     seat: Option<wl_seat::WlSeat>,
@@ -51,6 +67,7 @@ pub struct VirtualKeyboard {
     queue: EventQueue<VkState>,
     state: VkState,
     keyboard: vk_proto::ZwpVirtualKeyboardV1,
+    gap_ms: u32,
 }
 
 fn keymap_fd(km: &str) -> Result<std::fs::File, DaemonError> {
@@ -101,7 +118,7 @@ impl VirtualKeyboard {
 
         // The keymap is uploaded per text run (it carries that run's characters),
         // so no initial keymap is set here.
-        Some(Self { conn, queue, state, keyboard })
+        Some(Self { conn, queue, state, keyboard, gap_ms: detect_gap() })
     }
 
     /// Uploads `km` as the active XKB keymap and blocks until the compositor has
@@ -136,9 +153,9 @@ impl VirtualKeyboard {
             for &c in &seg {
                 if let Some(&code) = codes.get(&c) {
                     self.keyboard.key(t, code, KEY_PRESSED);
-                    t = t.wrapping_add(GAP_MS);
+                    t = t.wrapping_add(self.gap_ms);
                     self.keyboard.key(t, code, KEY_RELEASED);
-                    t = t.wrapping_add(GAP_MS);
+                    t = t.wrapping_add(self.gap_ms);
                 }
             }
         }
