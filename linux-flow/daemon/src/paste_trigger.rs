@@ -1,8 +1,7 @@
+use crate::inject_backends::{type_ascii_uinput, xdotool_type};
 use crate::wayland_vk::VirtualKeyboard;
-use crate::{error::DaemonError, keys, scancode, uinput_inner::Inner};
+use crate::{error::DaemonError, uinput_inner::Inner};
 use linux_flow_shared::display::DisplayServer;
-use std::io::Write;
-use std::process::{Command, Stdio};
 
 /// Selects how synthesized text reaches the focused window. All paths type the
 /// text directly — no clipboard, no paste shortcut.
@@ -62,81 +61,37 @@ impl TextInjector {
     ) -> Result<(), DaemonError> {
         match self {
             TextInjector::Wayland(vk) => {
+                // For an XWayland target, xdotool reaches it most reliably; otherwise
+                // the virtual keyboard is primary. Each tier is attempted only when the
+                // one above it errors *before* emitting text, so nothing is duplicated.
                 if let Some(id) = x11_window {
-                    // Target is an XWayland window — route through X11 directly.
-                    eprintln!("linux-flow-helper: text injector = xdotool (XWayland window {id})");
-                    if xdotool_type(text, Some(id)).is_ok() {
-                        return Ok(());
+                    eprintln!("linux-flow-helper: inject try 1 = xdotool (XWayland window {id})");
+                    if let Err(e) = xdotool_type(text, Some(id)) {
+                        eprintln!("linux-flow-helper: xdotool failed ({e}); try 2 = wayland-vk");
+                        if let Err(e) = vk.type_text(text) {
+                            eprintln!("linux-flow-helper: wayland-vk failed ({e}); try 3 = uinput");
+                            return type_ascii_uinput(inner, text);
+                        }
                     }
-                    // Window may have closed between press and inject; fall through to VK.
-                    eprintln!("linux-flow-helper: xdotool failed for window {id}, fallback to vk");
+                    return Ok(());
                 }
-                vk.type_text(text)
+                if let Err(e) = vk.type_text(text) {
+                    eprintln!("linux-flow-helper: wayland-vk failed ({e}); fallback = uinput");
+                    return type_ascii_uinput(inner, text);
+                }
+                Ok(())
             }
-            TextInjector::X11 => xdotool_type(text, x11_window),
+            TextInjector::X11 => {
+                if let Err(e) = xdotool_type(text, x11_window) {
+                    eprintln!("linux-flow-helper: xdotool failed ({e}); fallback = uinput");
+                    return type_ascii_uinput(inner, text);
+                }
+                Ok(())
+            }
             TextInjector::Uinput => {
                 eprintln!("linux-flow-helper: text injector = uinput (ASCII only, non-ASCII skipped)");
                 type_ascii_uinput(inner, text)
             }
         }
     }
-}
-
-/// Types `text` via `xdotool type`, reading from stdin so the transcript never
-/// appears in the process argument list (`/proc/<pid>/cmdline`).
-fn xdotool_type(text: &str, x11_window: Option<u64>) -> Result<(), DaemonError> {
-    let mut cmd = Command::new("/usr/bin/xdotool");
-    cmd.arg("type").arg("--clearmodifiers");
-    if let Some(id) = x11_window {
-        cmd.args(["--window", &id.to_string()]);
-    }
-    cmd.args(["--file", "-"]).stdin(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| DaemonError::InjectionFailed(format!("xdotool spawn: {e}")))?;
-    {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| DaemonError::InjectionFailed("xdotool stdin unavailable".into()))?;
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|e| DaemonError::InjectionFailed(format!("xdotool write: {e}")))?;
-    }
-    let status = child
-        .wait()
-        .map_err(|e| DaemonError::InjectionFailed(format!("xdotool wait: {e}")))?;
-    if !status.success() {
-        return Err(DaemonError::InjectionFailed(format!(
-            "xdotool exited with {:?}",
-            status.code()
-        )));
-    }
-    Ok(())
-}
-
-/// Last-resort raw-uinput typing. Only US-layout ASCII is reproducible; any
-/// other character is skipped (a warning is logged once).
-fn type_ascii_uinput(inner: &mut Inner, text: &str) -> Result<(), DaemonError> {
-    let mut skipped = false;
-    for c in text.chars() {
-        match scancode::ascii_scancode(c) {
-            Some((code, shift)) => {
-                if shift {
-                    inner.key_event(keys::KEY_LEFTSHIFT, true)?;
-                }
-                inner.key_event(code, true)?;
-                inner.key_event(code, false)?;
-                if shift {
-                    inner.key_event(keys::KEY_LEFTSHIFT, false)?;
-                }
-            }
-            None if !skipped => {
-                eprintln!("linux-flow-helper: uinput fallback cannot type non-ASCII; skipping");
-                skipped = true;
-            }
-            None => {}
-        }
-    }
-    Ok(())
 }
