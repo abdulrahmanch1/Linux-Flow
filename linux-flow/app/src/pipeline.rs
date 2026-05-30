@@ -214,10 +214,32 @@ impl Pipeline {
                 }
             };
 
+            // Guard against silence: a press with no speech yields an empty
+            // transcript. Feeding that to the LLM makes weak models hallucinate
+            // a large unrelated reply, which then gets injected. Never call the
+            // LLM on empty input.
+            if raw.trim().is_empty() {
+                raw.zeroize();
+                send_event(
+                    &events,
+                    PipelineEvent::Error("No speech detected. Try speaking more clearly.".into()),
+                )
+                .await;
+                continue;
+            }
+
             let model =
                 std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
             tracing::info!("pipeline: llm start");
-            let llm_res = self.llm.rewrite(self.or_key.clone(), &model, &raw).await;
+            let llm_res = self
+                .llm
+                .rewrite(
+                    self.or_key.clone(),
+                    &model,
+                    &raw,
+                    self.config.llm.message_splitting,
+                )
+                .await;
             tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
             let (mut text, fallback) = match llm_res {
                 Ok(t) => (t, false),
@@ -306,7 +328,19 @@ impl Pipeline {
                     Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
                 }
             }
-            match self.ipc.inject_text(text.as_str(), focused_win).await {
+            // Normalize the trailing break. Single-line mode strips any dangling
+            // newline so it never lands as a lone Enter (which would submit/run
+            // the text prematurely). Splitting mode appends exactly one newline so
+            // the final segment also sends, matching the earlier segments.
+            let trimmed = text.trim_end_matches(['\n', '\r', ' ', '\t']);
+            let with_break;
+            let to_inject = if self.config.llm.message_splitting {
+                with_break = Zeroizing::new(format!("{trimmed}\n"));
+                with_break.as_str()
+            } else {
+                trimmed
+            };
+            match self.ipc.inject_text(to_inject, focused_win).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");

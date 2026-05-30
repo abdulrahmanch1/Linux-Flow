@@ -16,6 +16,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let model_row = adw::EntryRow::new();
     model_row.set_title("Model");
     model_row.set_text(&cfg.llm.model);
+    let split_row = adw::SwitchRow::new();
+    split_row.set_title("Split into separate messages");
+    split_row.set_subtitle("Breaks your speech into separate lines at natural pauses and sends each as its own message in chat apps. Off keeps everything on one line — recommended for terminals and code editors.");
+    split_row.set_active(cfg.llm.message_splitting);
     let soniox_key_row = adw::PasswordEntryRow::new();
     soniox_key_row.set_title("Soniox API Key");
     let openrouter_key_row = adw::PasswordEntryRow::new();
@@ -24,6 +28,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     let general = adw::PreferencesGroup::new();
     general.set_title("General");
     general.add(&hotkey_row);
+
+    let dictation = adw::PreferencesGroup::new();
+    dictation.set_title("Dictation");
+    dictation.add(&split_row);
 
     let speech = adw::PreferencesGroup::new();
     speech.set_title("Speech Recognition");
@@ -44,6 +52,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
 
     let page = adw::PreferencesPage::new();
     page.add(&general);
+    page.add(&dictation);
     page.add(&speech);
     page.add(&llm_grp);
     page.add(&btn_grp);
@@ -69,6 +78,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
                 if !v.is_empty() {
                     c.llm.model = v;
                 }
+                c.llm.message_splitting = split_row.is_active();
             }) {
                 win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
                 return;

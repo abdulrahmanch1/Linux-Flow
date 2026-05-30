@@ -22,6 +22,11 @@ pub struct General {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Llm {
     pub model: String,
+    /// When true, the LLM may break dictation into multiple lines at natural
+    /// boundaries (chat-style message splitting). When false, output stays on a
+    /// single line unless the speaker explicitly says "new line"/"new paragraph".
+    #[serde(default)]
+    pub message_splitting: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +55,7 @@ impl Default for Config {
             },
             llm: Llm {
                 model: "google/gemini-2.0-flash-lite-001".into(),
+                message_splitting: false,
             },
             soniox: Soniox {
                 language: "auto".into(),

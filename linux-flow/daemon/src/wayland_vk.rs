@@ -9,10 +9,26 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 };
 use crate::{error::DaemonError, keymap};
 
-const GAP_MS: u32 = 4;     // timestamp delta between successive key events
 const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
+
+/// Per-event timestamp delta (ms). Too small and compositors coalesce or drop
+/// rapid press/release pairs, dropping characters; too large and long text
+/// types slowly. Calibrated per compositor via [`detect_gap`].
+fn detect_gap() -> u32 {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if desktop.contains("cosmic") {
+        8 // smithay/cosmic-comp coalesces aggressively
+    } else if desktop.contains("gnome") {
+        6 // Mutter
+    } else {
+        4 // KDE/KWin, wlroots, and unknown — tolerate fast input
+    }
+}
 
 struct VkState {
     seat: Option<wl_seat::WlSeat>,
@@ -51,6 +67,7 @@ pub struct VirtualKeyboard {
     queue: EventQueue<VkState>,
     state: VkState,
     keyboard: vk_proto::ZwpVirtualKeyboardV1,
+    gap_ms: u32,
 }
 
 fn keymap_fd(km: &str) -> Result<std::fs::File, DaemonError> {
@@ -101,7 +118,7 @@ impl VirtualKeyboard {
 
         // The keymap is uploaded per text run (it carries that run's characters),
         // so no initial keymap is set here.
-        Some(Self { conn, queue, state, keyboard })
+        Some(Self { conn, queue, state, keyboard, gap_ms: detect_gap() })
     }
 
     /// Uploads `km` as the active XKB keymap and blocks until the compositor has
@@ -112,6 +129,10 @@ impl VirtualKeyboard {
         self.queue
             .roundtrip(&mut self.state)
             .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
+        // Initialize modifier state on the freshly-keymapped device. Without this,
+        // many compositors (COSMIC, Mutter) discard the very first key event of a
+        // new virtual keyboard, dropping the first typed character.
+        self.keyboard.modifiers(0, 0, 0, 0);
         drop(kfd); // compositor has dup'd the fd via SCM_RIGHTS
         Ok(())
     }
@@ -119,7 +140,8 @@ impl VirtualKeyboard {
     /// Types `text` into the focused window by generating, per run, a dynamic
     /// XKB keymap whose keys are the run's exact characters, then emitting a
     /// press/release pair per character. Layout-independent and Unicode-complete
-    /// (Arabic, emoji, CJK) — never touches the clipboard or modifiers.
+    /// (Arabic, emoji, CJK) — never touches the clipboard. Modifiers are only
+    /// reset to a known-empty state, never held.
     pub fn type_text(&mut self, text: &str) -> Result<(), DaemonError> {
         let mut t = now_ms();
         for seg in keymap::segments(text) {
@@ -133,12 +155,19 @@ impl VirtualKeyboard {
                 });
             }
             self.set_keymap(&keymap::build_keymap(&uniq))?;
+            // Sacrificial warm-up: compositors drop the first key event after a
+            // keymap change, which otherwise eats the segment's first character.
+            // This key maps to VoidSymbol, so it is harmless if not dropped.
+            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_PRESSED);
+            t = t.wrapping_add(self.gap_ms);
+            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_RELEASED);
+            t = t.wrapping_add(self.gap_ms);
             for &c in &seg {
                 if let Some(&code) = codes.get(&c) {
                     self.keyboard.key(t, code, KEY_PRESSED);
-                    t = t.wrapping_add(GAP_MS);
+                    t = t.wrapping_add(self.gap_ms);
                     self.keyboard.key(t, code, KEY_RELEASED);
-                    t = t.wrapping_add(GAP_MS);
+                    t = t.wrapping_add(self.gap_ms);
                 }
             }
         }
