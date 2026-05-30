@@ -13,21 +13,38 @@ const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
 
-/// Per-event timestamp delta (ms). Too small and compositors coalesce or drop
-/// rapid press/release pairs, dropping characters; too large and long text
-/// types slowly. Calibrated per compositor via [`detect_gap`].
-fn detect_gap() -> u32 {
+/// Per-event timestamp deltas (ms), as a `(press_gap, char_gap)` pair.
+///
+/// `press_gap` is the delta between a key's press and its own release. Too
+/// small and compositors coalesce the pair and drop the character; this is the
+/// value that protects against dropping. `char_gap` is the delta between one
+/// key's release and the next key's press — those are distinct keycodes that do
+/// not coalesce, so it can be near-zero to type fast without losing characters.
+/// Calibrated per compositor, and overridable via `LINUX_FLOW_VK_PRESS_GAP_MS`
+/// and `LINUX_FLOW_VK_CHAR_GAP_MS` for empirical tuning without a rebuild.
+fn detect_gap() -> (u32, u32) {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if desktop.contains("cosmic") {
-        8 // smithay/cosmic-comp coalesces aggressively
+    let (mut press_gap, mut char_gap) = if desktop.contains("cosmic") {
+        (8, 1) // smithay/cosmic-comp coalesces aggressively
     } else if desktop.contains("gnome") {
-        6 // Mutter
+        (6, 1) // Mutter
     } else {
-        4 // KDE/KWin, wlroots, and unknown — tolerate fast input
+        (4, 1) // KDE/KWin, wlroots, and unknown — tolerate fast input
+    };
+    if let Some(v) = env_gap("LINUX_FLOW_VK_PRESS_GAP_MS") {
+        press_gap = v;
     }
+    if let Some(v) = env_gap("LINUX_FLOW_VK_CHAR_GAP_MS") {
+        char_gap = v;
+    }
+    (press_gap, char_gap)
+}
+
+fn env_gap(name: &str) -> Option<u32> {
+    std::env::var(name).ok()?.trim().parse().ok()
 }
 
 struct VkState {
@@ -67,7 +84,8 @@ pub struct VirtualKeyboard {
     queue: EventQueue<VkState>,
     state: VkState,
     keyboard: vk_proto::ZwpVirtualKeyboardV1,
-    gap_ms: u32,
+    press_gap: u32,
+    char_gap: u32,
 }
 
 fn keymap_fd(km: &str) -> Result<std::fs::File, DaemonError> {
@@ -118,7 +136,8 @@ impl VirtualKeyboard {
 
         // The keymap is uploaded per text run (it carries that run's characters),
         // so no initial keymap is set here.
-        Some(Self { conn, queue, state, keyboard, gap_ms: detect_gap() })
+        let (press_gap, char_gap) = detect_gap();
+        Some(Self { conn, queue, state, keyboard, press_gap, char_gap })
     }
 
     /// Uploads `km` as the active XKB keymap and blocks until the compositor has
@@ -155,19 +174,25 @@ impl VirtualKeyboard {
                 });
             }
             self.set_keymap(&keymap::build_keymap(&uniq))?;
-            // Sacrificial warm-up: compositors drop the first key event after a
-            // keymap change, which otherwise eats the segment's first character.
-            // This key maps to VoidSymbol, so it is harmless if not dropped.
+            // Sacrificial warm-up: compositors drop or misresolve the first key
+            // event after a keymap change, which otherwise eats or corrupts the
+            // segment's first character. This key maps to VoidSymbol, so it is
+            // harmless if not dropped. Roundtrip after it so the compositor fully
+            // processes the keymap and warm-up before the real characters arrive,
+            // never typing the first real character against a stale layout.
             self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_PRESSED);
-            t = t.wrapping_add(self.gap_ms);
+            t = t.wrapping_add(self.press_gap);
             self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_RELEASED);
-            t = t.wrapping_add(self.gap_ms);
+            t = t.wrapping_add(self.press_gap);
+            self.queue
+                .roundtrip(&mut self.state)
+                .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
             for &c in &seg {
                 if let Some(&code) = codes.get(&c) {
                     self.keyboard.key(t, code, KEY_PRESSED);
-                    t = t.wrapping_add(self.gap_ms);
+                    t = t.wrapping_add(self.press_gap);
                     self.keyboard.key(t, code, KEY_RELEASED);
-                    t = t.wrapping_add(self.gap_ms);
+                    t = t.wrapping_add(self.char_gap);
                 }
             }
         }
