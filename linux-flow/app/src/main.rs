@@ -83,7 +83,12 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     main_loop.run();
-    ExitCode::SUCCESS
+    // Deliberately bypass Runtime::drop. On Quit, hotkey spawn_blocking tasks
+    // (evdev inotify / XGrabKey) can stay blocked indefinitely, which deadlocks
+    // the runtime's drop and leaves the process alive holding the instance flock
+    // — so a relaunch from the app menu silently exits as "already running".
+    // Exiting directly kills every thread and frees the lock immediately.
+    std::process::exit(0);
 }
 
 fn init_tracing(debug: bool) {
