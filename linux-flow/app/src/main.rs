@@ -80,10 +80,19 @@ fn main() -> ExitCode {
     if let Err(e) = start_backend(&rt, &main_loop) {
         eprintln!("linux-flow: {e}");
         tracing::error!("{e}");
-        return ExitCode::FAILURE;
+        // Exit directly rather than returning: start_backend may have already
+        // launched the hotkey backend (with its blocking tasks), and returning
+        // here would deadlock Runtime::drop the same way Quit does — leaving the
+        // process alive holding the instance flock.
+        std::process::exit(1);
     }
     main_loop.run();
-    ExitCode::SUCCESS
+    // Deliberately bypass Runtime::drop. On Quit, hotkey spawn_blocking tasks
+    // (evdev inotify / XGrabKey) can stay blocked indefinitely, which deadlocks
+    // the runtime's drop and leaves the process alive holding the instance flock
+    // — so a relaunch from the app menu silently exits as "already running".
+    // Exiting directly kills every thread and frees the lock immediately.
+    std::process::exit(0);
 }
 
 fn init_tracing(debug: bool) {
