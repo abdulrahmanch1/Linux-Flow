@@ -12,15 +12,14 @@ const SAVED_KEY_PLACEHOLDER: &str = "••••••••••••";
 pub fn build_settings() -> adw::PreferencesWindow {
     let cfg = Config::load().unwrap_or_default();
 
-    let hotkey_row = adw::EntryRow::new();
-    hotkey_row.set_title("Push-to-Talk Hotkey");
-    hotkey_row.set_text(&cfg.general.hotkey);
+    let hotkey_picker = crate::hotkey_picker::HotkeyPicker::new(&cfg.general.hotkey);
     let lang_row = adw::EntryRow::new();
     lang_row.set_title("Language");
     lang_row.set_text(&cfg.soniox.language);
     let model_row = adw::EntryRow::new();
     model_row.set_title("Model");
     model_row.set_text(&cfg.llm.model);
+    crate::model_suggest::attach_model_suggestions(&model_row);
     let split_row = adw::SwitchRow::new();
     split_row.set_title("Split into separate messages");
     split_row.set_subtitle("Breaks your speech into separate lines at natural pauses and sends each as its own message in chat apps. Off keeps everything on one line — recommended for terminals and code editors.");
@@ -39,7 +38,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
 
     let general = adw::PreferencesGroup::new();
     general.set_title("General");
-    general.add(&hotkey_row);
+    general.add(hotkey_picker.row());
 
     let dictation = adw::PreferencesGroup::new();
     dictation.set_title("Dictation");
@@ -85,10 +84,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
         let win = window.clone();
         move |_| {
             if let Err(e) = patch_config(|c| {
-                let v = hotkey_row.text().to_string();
-                if !v.is_empty() {
-                    c.general.hotkey = v;
-                }
+                c.general.hotkey = hotkey_picker.selected_evdev().to_string();
                 let v = lang_row.text().to_string();
                 if !v.is_empty() {
                     c.soniox.language = v;

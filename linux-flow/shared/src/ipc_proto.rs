@@ -9,7 +9,10 @@ const MAX_PAYLOAD_BYTES: usize = 1024 * 1024; // 1 MB
 
 #[derive(Serialize, Deserialize)]
 pub enum IpcRequest {
-    InjectText { text: String, x11_window: Option<u64> },
+    InjectText {
+        text: String,
+        x11_window: Option<u64>,
+    },
 }
 
 impl std::fmt::Debug for IpcRequest {

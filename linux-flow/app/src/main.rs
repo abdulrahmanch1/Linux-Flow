@@ -1,8 +1,11 @@
 mod asr;
 mod audio;
 mod hotkey;
+mod hotkey_picker;
 mod inject;
 mod llm;
+mod model_suggest;
+mod models;
 mod notifications;
 mod pipeline;
 mod secrets;
@@ -49,7 +52,11 @@ fn acquire_instance_lock() -> Option<std::fs::File> {
         .ok()?;
     // SAFETY: fd is valid; LOCK_EX|LOCK_NB is a valid flock(2) combination.
     let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if ret == 0 { Some(file) } else { None }
+    if ret == 0 {
+        Some(file)
+    } else {
+        None
+    }
 }
 
 fn main() -> ExitCode {

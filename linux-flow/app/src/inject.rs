@@ -66,7 +66,9 @@ impl IpcClient {
             x11_window,
         };
         let mut frame = encode_frame(&ipc_req).map_err(|e| e.to_string())?;
-        let IpcRequest::InjectText { text: ref mut t, .. } = ipc_req;
+        let IpcRequest::InjectText {
+            text: ref mut t, ..
+        } = ipc_req;
         t.zeroize();
 
         let stream = self
