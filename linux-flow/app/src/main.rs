@@ -76,6 +76,10 @@ fn main() -> ExitCode {
     if rt.block_on(wizard::needs_setup()) {
         run_wizard();
     }
+    // On autostart the app can launch before the compositor's Wayland socket is
+    // ready (notably on COSMIC). Wait for a display server so backend selection
+    // sees the real session instead of committing to Unknown and exiting.
+    linux_flow_shared::display::wait_for_display(Duration::from_secs(30));
     let main_loop = glib::MainLoop::new(None, false);
     if let Err(e) = start_backend(&rt, &main_loop) {
         eprintln!("linux-flow: {e}");
