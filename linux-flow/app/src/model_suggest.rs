@@ -18,7 +18,7 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
 
     let scroller = gtk4::ScrolledWindow::new();
     scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroller.set_max_content_height(240);
+    scroller.set_max_content_height(200);
     scroller.set_propagate_natural_height(true);
     scroller.set_child(Some(&list));
 
@@ -28,6 +28,7 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     popover.set_autohide(false);
     popover.set_has_arrow(false);
     popover.set_position(gtk4::PositionType::Bottom);
+    popover.add_css_class("menu");
     popover.set_child(Some(&scroller));
     popover.set_parent(entry);
 
@@ -49,11 +50,18 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
         #[weak]
         popover,
         #[weak]
+        scroller,
+        #[weak]
         list,
         #[strong]
         ids,
         move |e| {
-            refilter(&list, &popover, &e.text(), &ids.borrow());
+            if refilter(&list, &e.text(), &ids.borrow()) == 0 {
+                popover.popdown();
+            } else {
+                anchor_below(&popover, &scroller, e);
+                popover.popup();
+            }
         }
     ));
 
@@ -68,26 +76,43 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     spawn_fetch(ids);
 }
 
-fn refilter(list: &gtk4::ListBox, popover: &gtk4::Popover, text: &str, ids: &[String]) {
+/// Pins the popover to the entry's bottom edge and matches its width, so the
+/// list always drops downward and spans the field instead of floating above it
+/// at an arbitrary width.
+fn anchor_below(popover: &gtk4::Popover, scroller: &gtk4::ScrolledWindow, entry: &adw::EntryRow) {
+    // Match the field width (with a sane floor in case the row is not yet
+    // allocated) so the list spans the field and lines up with its edges
+    // instead of floating narrow and centred.
+    let width = entry.width().max(360);
+    scroller.set_size_request(width, -1);
+    // Point at the whole field rather than just its bottom edge: dropping down
+    // it clears the field's bottom, and when GTK must flip it up near a screen
+    // edge it clears the field's top — never overlapping the input either way.
+    let field = gtk4::gdk::Rectangle::new(0, 0, width, entry.height());
+    popover.set_pointing_to(Some(&field));
+}
+
+/// Rebuilds the suggestion rows for the current text and returns how many were
+/// shown. Returns 0 for an empty field or when the text already equals an id.
+fn refilter(list: &gtk4::ListBox, text: &str, ids: &[String]) -> usize {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
 
     let needle = text.trim().to_lowercase();
-    // Nothing to suggest for an empty field or when the text is already an exact id.
     if needle.is_empty() || ids.iter().any(|id| id == text) {
-        popover.popdown();
-        return;
+        return 0;
     }
 
     let mut shown = 0;
     for id in ids.iter().filter(|id| id.to_lowercase().contains(&needle)) {
         let label = gtk4::Label::new(Some(id));
         label.set_xalign(0.0);
+        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         label.set_margin_top(6);
         label.set_margin_bottom(6);
-        label.set_margin_start(8);
-        label.set_margin_end(8);
+        label.set_margin_start(12);
+        label.set_margin_end(12);
 
         let row = gtk4::ListBoxRow::new();
         row.set_child(Some(&label));
@@ -100,11 +125,7 @@ fn refilter(list: &gtk4::ListBox, popover: &gtk4::Popover, text: &str, ids: &[St
         }
     }
 
-    if shown == 0 {
-        popover.popdown();
-    } else {
-        popover.popup();
-    }
+    shown
 }
 
 fn spawn_fetch(ids: Rc<RefCell<Vec<String>>>) {
