@@ -85,8 +85,11 @@ fn anchor_below(popover: &gtk4::Popover, scroller: &gtk4::ScrolledWindow, entry:
     // instead of floating narrow and centred.
     let width = entry.width().max(360);
     scroller.set_size_request(width, -1);
-    let bottom = gtk4::gdk::Rectangle::new(0, entry.height(), width, 1);
-    popover.set_pointing_to(Some(&bottom));
+    // Point at the whole field rather than just its bottom edge: dropping down
+    // it clears the field's bottom, and when GTK must flip it up near a screen
+    // edge it clears the field's top — never overlapping the input either way.
+    let field = gtk4::gdk::Rectangle::new(0, 0, width, entry.height());
+    popover.set_pointing_to(Some(&field));
 }
 
 /// Rebuilds the suggestion rows for the current text and returns how many were
