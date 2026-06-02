@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 /// focuses the field to type a replacement.
 const SAVED_KEY_PLACEHOLDER: &str = "••••••••••••";
 
-pub fn build_settings() -> adw::PreferencesWindow {
+pub fn build_settings() -> adw::Window {
     let cfg = Config::load().unwrap_or_default();
 
     let hotkey_picker = crate::hotkey_picker::HotkeyPicker::new(&cfg.general.hotkey);
@@ -22,7 +22,10 @@ pub fn build_settings() -> adw::PreferencesWindow {
     crate::model_suggest::attach_model_suggestions(&model_row);
     let split_row = adw::SwitchRow::new();
     split_row.set_title("Split into separate messages");
-    split_row.set_subtitle("Breaks your speech into separate lines at natural pauses and sends each as its own message in chat apps. Off keeps everything on one line — recommended for terminals and code editors.");
+    split_row.set_subtitle(
+        "Sends each natural pause as its own chat message. Off keeps one line — \
+         best for terminals and editors.",
+    );
     split_row.set_active(cfg.llm.message_splitting);
     let soniox_key_row = adw::PasswordEntryRow::new();
     soniox_key_row.set_title("Soniox API Key");
@@ -54,24 +57,34 @@ pub fn build_settings() -> adw::PreferencesWindow {
     llm_grp.add(&model_row);
     llm_grp.add(&openrouter_key_row);
 
-    let confirm_btn = gtk4::Button::with_label("Confirm");
-    confirm_btn.add_css_class("suggested-action");
-    confirm_btn.add_css_class("pill");
-
-    let btn_grp = adw::PreferencesGroup::new();
-    btn_grp.add(&confirm_btn);
-
     let page = adw::PreferencesPage::new();
     page.add(&general);
     page.add(&dictation);
     page.add(&speech);
     page.add(&llm_grp);
-    page.add(&btn_grp);
 
-    let window = adw::PreferencesWindow::new();
+    // Toasts need an overlay host since a plain `adw::Window` — unlike a
+    // `PreferencesWindow` — does not surface them on its own.
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&page));
+
+    // Explicit apply lives in the header bar (where the window's primary action
+    // belongs), not as a stray button floating inside the scrolled content.
+    let apply_btn = gtk4::Button::with_label("Apply");
+    apply_btn.add_css_class("suggested-action");
+
+    let header = adw::HeaderBar::new();
+    header.set_title_widget(Some(&adw::WindowTitle::new("Settings", "")));
+    header.pack_end(&apply_btn);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&toasts));
+
+    let window = adw::Window::new();
     window.set_title(Some("linux-flow Settings"));
-    window.set_default_size(480, -1);
-    window.add(&page);
+    window.set_default_size(480, 640);
+    window.set_content(Some(&toolbar));
 
     show_saved_placeholders(
         &soniox_key_row,
@@ -80,8 +93,9 @@ pub fn build_settings() -> adw::PreferencesWindow {
         Rc::clone(&openrouter_pristine),
     );
 
-    confirm_btn.connect_clicked({
+    apply_btn.connect_clicked({
         let win = window.clone();
+        let toasts = toasts.clone();
         move |_| {
             if let Err(e) = patch_config(|c| {
                 c.general.hotkey = hotkey_picker.selected_evdev().to_string();
@@ -95,7 +109,7 @@ pub fn build_settings() -> adw::PreferencesWindow {
                 }
                 c.llm.message_splitting = split_row.is_active();
             }) {
-                win.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
+                toasts.add_toast(adw::Toast::new(&format!("Failed to save settings: {e}")));
                 return;
             }
             let (tx, rx) = mpsc::channel::<(&'static str, Result<(), String>)>();
@@ -123,13 +137,14 @@ pub fn build_settings() -> adw::PreferencesWindow {
 
             let remaining = Rc::new(Cell::new(expected));
             let win_c = win.clone();
+            let toasts_c = toasts.clone();
             gtk4::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
                 loop {
                     match rx.try_recv() {
                         Ok((name, result)) => {
                             remaining.set(remaining.get() - 1);
                             if let Err(e) = result {
-                                win_c.add_toast(adw::Toast::new(&format!(
+                                toasts_c.add_toast(adw::Toast::new(&format!(
                                     "Failed to save {name} key: {e}"
                                 )));
                             }
