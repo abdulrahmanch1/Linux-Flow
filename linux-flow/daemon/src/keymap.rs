@@ -29,6 +29,29 @@ fn keysym_token(c: char) -> String {
     }
 }
 
+/// evdev keycode of a character in the fixed base keymap, or `None` if the
+/// character lies outside it (Arabic, emoji, CJK → dynamic path). Printable
+/// ASCII `U+0020..=U+007E` maps to `1..=95`, `\n` to `96`, `\t` to `97`. Acts
+/// as both the membership test and the keycode translator on the hot path.
+pub fn base_evdev(c: char) -> Option<u32> {
+    match c {
+        ' '..='~' => Some(c as u32 - 0x20 + 1),
+        '\n' => Some(96),
+        '\t' => Some(97),
+        _ => None,
+    }
+}
+
+/// Builds the fixed base keymap: all printable ASCII plus Return and Tab, at the
+/// keycodes [`base_evdev`] assigns. Uploaded once at daemon start, never on the
+/// hot path, so ASCII text needs no per-run keymap upload.
+pub fn build_base_keymap() -> String {
+    let mut chars: Vec<char> = (0x20u32..=0x7E).filter_map(char::from_u32).collect();
+    chars.push('\n');
+    chars.push('\t');
+    build_keymap(&chars)
+}
+
 /// Builds a complete, null-terminated XKB keymap mapping each char in `chars`
 /// to evdev keycode `index + 1` (XKB keycode `index + 9`). `chars` must hold
 /// distinct characters and be no longer than [`MAX_KEYS`].

@@ -1,7 +1,7 @@
 use crate::{
     error::DaemonError,
-    paste_trigger::TextInjector,
     server::KeyInjector,
+    text_injector::TextInjector,
     uinput_inner::{
         Inner, InputId, UinputSetup, ALL_KEYS, BUS_VIRTUAL, UI_DEV_CREATE, UI_DEV_DESTROY,
         UI_DEV_SETUP, UI_SET_EVBIT, UI_SET_KEYBIT,
