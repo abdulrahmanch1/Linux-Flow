@@ -150,18 +150,34 @@ pub async fn spawn_tray(
     settings_tx: stdmpsc::SyncSender<()>,
     about_tx: stdmpsc::SyncSender<()>,
 ) -> Result<TrayHandle, TrayError> {
-    let handle = AppTray {
-        state: TrayState::Idle,
-        frame: 0,
-        wave_frames: make_wave_frames([0xFF, 0x4C, 0xAF, 0x50]),
-        proc_frames: make_wave_frames([0xFF, 0x42, 0xA5, 0xF5]),
-        quit_tx,
-        settings_tx,
-        about_tx,
-    }
-    .spawn()
-    .await
-    .map_err(|e| TrayError::Service(e.to_string()))?;
+    // On a cold boot the StatusNotifierWatcher may not be registered yet (notably
+    // on COSMIC), so the first spawn can fail with "name is not activatable".
+    // Retry until the watcher appears rather than leaving the user with no icon.
+    const MAX_ATTEMPTS: u32 = 30;
+    const RETRY_DELAY: Duration = Duration::from_secs(1);
+    let wave_frames = make_wave_frames([0xFF, 0x4C, 0xAF, 0x50]);
+    let proc_frames = make_wave_frames([0xFF, 0x42, 0xA5, 0xF5]);
+    let mut attempt = 0;
+    let handle = loop {
+        attempt += 1;
+        let tray = AppTray {
+            state: TrayState::Idle,
+            frame: 0,
+            wave_frames: wave_frames.clone(),
+            proc_frames: proc_frames.clone(),
+            quit_tx: quit_tx.clone(),
+            settings_tx: settings_tx.clone(),
+            about_tx: about_tx.clone(),
+        };
+        match tray.spawn().await {
+            Ok(h) => break h,
+            Err(e) if attempt < MAX_ATTEMPTS => {
+                tracing::warn!("tray registration failed ({e}), retry {attempt}/{MAX_ATTEMPTS}");
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
+            Err(e) => return Err(TrayError::Service(e.to_string())),
+        }
+    };
 
     let animating = Arc::new(AtomicBool::new(false));
     let anim_handle = handle.clone();

@@ -1,3 +1,6 @@
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayServer {
     Wayland,
@@ -14,15 +17,23 @@ pub fn detect() -> DisplayServer {
     // pam_systemd sets XDG_RUNTIME_DIR at login, before any graphical session,
     // so it is reliable even when PassEnvironment= hasn't propagated WAYLAND_DISPLAY yet.
     //
-    // OnceLock guarantees the set_var call happens from a single thread even when
-    // detect() is called concurrently from multiple spawn_blocking tasks.
-    static SOCKET_PROBED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    SOCKET_PROBED.get_or_init(|| {
-        if let Some(name) = probe_wayland_socket() {
-            // SAFETY: runs exactly once, guaranteed by OnceLock — no concurrent writers.
-            unsafe { std::env::set_var("WAYLAND_DISPLAY", &name) };
+    // The probe must be retried on every call until it first succeeds: the daemon
+    // and the app can start at boot before the compositor's socket exists (notably
+    // on COSMIC, where the graphical session comes up after the user services).
+    // A cached negative result would pin the process to the wrong backend for the
+    // whole session. A Mutex serialises the set_var so it still happens from a
+    // single writer; once it succeeds, the fast path above returns first and this
+    // block is never reached again — so set_var effectively runs at most once.
+    static PROBE_LOCK: Mutex<()> = Mutex::new(());
+    if let Ok(_guard) = PROBE_LOCK.lock() {
+        // Re-check inside the lock: another thread may have set it meanwhile.
+        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            if let Some(name) = probe_wayland_socket() {
+                // SAFETY: held under PROBE_LOCK — no concurrent writers.
+                unsafe { std::env::set_var("WAYLAND_DISPLAY", &name) };
+            }
         }
-    });
+    }
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         return DisplayServer::Wayland;
     }
@@ -30,6 +41,23 @@ pub fn detect() -> DisplayServer {
         return DisplayServer::X11;
     }
     DisplayServer::Unknown
+}
+
+/// Blocks until a display server is detected or `timeout` elapses, polling at a
+/// short interval. Returns the last `detect()` result either way.
+///
+/// On autostart the app can launch before the compositor's Wayland socket
+/// exists; waiting here lets backend selection see the real display instead of
+/// committing to `Unknown` (which would otherwise kill the app or pick evdev).
+pub fn wait_for_display(timeout: Duration) -> DisplayServer {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let server = detect();
+        if server != DisplayServer::Unknown || Instant::now() >= deadline {
+            return server;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn probe_wayland_socket() -> Option<std::ffi::OsString> {

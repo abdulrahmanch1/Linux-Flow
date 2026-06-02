@@ -7,9 +7,12 @@ pub(crate) mod x11_backend;
 #[path = "hotkey_evdev.rs"]
 pub(crate) mod evdev_backend;
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 
 use linux_flow_shared::display::{self, DisplayServer};
@@ -40,6 +43,39 @@ pub enum HotkeyError {
     EvdevUnsupported,
     #[error("XGrabKey failed: key is already grabbed by another process")]
     X11GrabFailed,
+}
+
+impl HotkeyError {
+    /// Transient errors raised while the XDG GlobalShortcuts portal is still
+    /// coming up — worth retrying before falling back to another backend.
+    fn is_portal_setup(&self) -> bool {
+        matches!(self, HotkeyError::SetupTimeout | HotkeyError::Portal(_))
+    }
+}
+
+/// Runs the Wayland portal backend, retrying portal setup a few times.
+///
+/// On a cold boot the portal (e.g. `xdg-desktop-portal-cosmic`) may not be up
+/// yet when the app autostarts. Retrying keeps us on the correct Wayland path
+/// instead of prematurely committing to the X11/evdev fallback.
+async fn run_wayland_with_retry(
+    tx: mpsc::Sender<HotkeyEvent>,
+    hotkey: String,
+) -> Result<(), HotkeyError> {
+    const MAX_ATTEMPTS: u32 = 5;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match wayland_backend::WaylandBackend::run(tx.clone(), hotkey.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) if e.is_portal_setup() && attempt < MAX_ATTEMPTS => {
+                tracing::warn!("wayland portal not ready ({e}), retry {attempt}/{MAX_ATTEMPTS}");
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 pub struct HotkeyManager {
@@ -88,9 +124,7 @@ impl HotkeyManager {
             DisplayServer::Wayland => {
                 let stop = Arc::clone(&x11_stop);
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        wayland_backend::WaylandBackend::run(raw_tx.clone(), hotkey.clone()).await
-                    {
+                    if let Err(e) = run_wayland_with_retry(raw_tx.clone(), hotkey.clone()).await {
                         tracing::warn!("wayland portal unavailable ({e}), trying X11 + evdev");
                         if std::env::var_os("DISPLAY").is_some() {
                             let tx = raw_tx.clone();
