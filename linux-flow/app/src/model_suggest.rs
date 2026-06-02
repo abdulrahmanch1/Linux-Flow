@@ -15,11 +15,10 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.set_can_focus(false);
-    list.add_css_class("menu");
 
     let scroller = gtk4::ScrolledWindow::new();
     scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroller.set_max_content_height(240);
+    scroller.set_max_content_height(200);
     scroller.set_propagate_natural_height(true);
     scroller.set_child(Some(&list));
 
@@ -81,8 +80,11 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
 /// list always drops downward and spans the field instead of floating above it
 /// at an arbitrary width.
 fn anchor_below(popover: &gtk4::Popover, scroller: &gtk4::ScrolledWindow, entry: &adw::EntryRow) {
-    let width = entry.width().max(1);
-    scroller.set_min_content_width(width);
+    // Match the field width (with a sane floor in case the row is not yet
+    // allocated) so the list spans the field and lines up with its edges
+    // instead of floating narrow and centred.
+    let width = entry.width().max(360);
+    scroller.set_size_request(width, -1);
     let bottom = gtk4::gdk::Rectangle::new(0, entry.height(), width, 1);
     popover.set_pointing_to(Some(&bottom));
 }
@@ -104,8 +106,8 @@ fn refilter(list: &gtk4::ListBox, text: &str, ids: &[String]) -> usize {
         let label = gtk4::Label::new(Some(id));
         label.set_xalign(0.0);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        label.set_margin_top(8);
-        label.set_margin_bottom(8);
+        label.set_margin_top(6);
+        label.set_margin_bottom(6);
         label.set_margin_start(12);
         label.set_margin_end(12);
 
