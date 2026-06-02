@@ -16,6 +16,18 @@ pub(crate) fn gdk_to_evdev(name: &str) -> Option<&'static str> {
         "Shift_R" => Some("KEY_RIGHTSHIFT"),
         "Shift_L" => Some("KEY_LEFTSHIFT"),
         "Caps_Lock" => Some("KEY_CAPSLOCK"),
+        "F13" => Some("KEY_F13"),
+        "F14" => Some("KEY_F14"),
+        "F15" => Some("KEY_F15"),
+        "F16" => Some("KEY_F16"),
+        "F17" => Some("KEY_F17"),
+        "F18" => Some("KEY_F18"),
+        "F19" => Some("KEY_F19"),
+        "F20" => Some("KEY_F20"),
+        "F21" => Some("KEY_F21"),
+        "F22" => Some("KEY_F22"),
+        "F23" => Some("KEY_F23"),
+        "F24" => Some("KEY_F24"),
         _ => None,
     }
 }

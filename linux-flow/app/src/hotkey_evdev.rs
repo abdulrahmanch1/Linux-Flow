@@ -18,6 +18,18 @@ fn name_to_key(name: &str) -> Option<Key> {
         "KEY_CAPSLOCK" => Some(Key::KEY_CAPSLOCK),
         "KEY_RIGHTSHIFT" => Some(Key::KEY_RIGHTSHIFT),
         "KEY_LEFTSHIFT" => Some(Key::KEY_LEFTSHIFT),
+        "KEY_F13" => Some(Key::KEY_F13),
+        "KEY_F14" => Some(Key::KEY_F14),
+        "KEY_F15" => Some(Key::KEY_F15),
+        "KEY_F16" => Some(Key::KEY_F16),
+        "KEY_F17" => Some(Key::KEY_F17),
+        "KEY_F18" => Some(Key::KEY_F18),
+        "KEY_F19" => Some(Key::KEY_F19),
+        "KEY_F20" => Some(Key::KEY_F20),
+        "KEY_F21" => Some(Key::KEY_F21),
+        "KEY_F22" => Some(Key::KEY_F22),
+        "KEY_F23" => Some(Key::KEY_F23),
+        "KEY_F24" => Some(Key::KEY_F24),
         _ => None,
     }
 }
@@ -68,9 +80,10 @@ fn spawn_inotify(hotplug_tx: mpsc::Sender<PathBuf>) {
                 return;
             }
         };
-        if let Err(e) =
-            watcher.watch(std::path::Path::new("/dev/input"), RecursiveMode::NonRecursive)
-        {
+        if let Err(e) = watcher.watch(
+            std::path::Path::new("/dev/input"),
+            RecursiveMode::NonRecursive,
+        ) {
             tracing::warn!("inotify watch on /dev/input failed: {e}");
             return;
         }

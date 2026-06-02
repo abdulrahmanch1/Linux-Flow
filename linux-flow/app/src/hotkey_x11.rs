@@ -38,6 +38,18 @@ fn evdev_name_to_x11_keycode(name: &str) -> Option<u8> {
         "KEY_CAPSLOCK" => 58,
         "KEY_RIGHTSHIFT" => 54,
         "KEY_LEFTSHIFT" => 42,
+        "KEY_F13" => 183,
+        "KEY_F14" => 184,
+        "KEY_F15" => 185,
+        "KEY_F16" => 186,
+        "KEY_F17" => 187,
+        "KEY_F18" => 188,
+        "KEY_F19" => 189,
+        "KEY_F20" => 190,
+        "KEY_F21" => 191,
+        "KEY_F22" => 192,
+        "KEY_F23" => 193,
+        "KEY_F24" => 194,
         _ => return None,
     };
     Some(evdev + 8)

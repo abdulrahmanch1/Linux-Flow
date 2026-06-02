@@ -93,9 +93,7 @@ impl Pipeline {
             // `getwindowfocus` uses XGetInputFocus — works for XWayland apps on
             // GNOME Wayland where `getactivewindow` (_NET_ACTIVE_WINDOW) fails.
             let focused_win: Option<u64> =
-                if self.display == DisplayServer::X11
-                    || std::env::var_os("DISPLAY").is_some()
-                {
+                if self.display == DisplayServer::X11 || std::env::var_os("DISPLAY").is_some() {
                     tokio::process::Command::new("xdotool")
                         .arg("getwindowfocus")
                         .output()
@@ -115,8 +113,11 @@ impl Pipeline {
             let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
                 Ok(triple) => triple,
                 Err(e) => {
-                    send_event(&events, PipelineEvent::Error(format!("Audio capture failed: {e}")))
-                        .await;
+                    send_event(
+                        &events,
+                        PipelineEvent::Error(format!("Audio capture failed: {e}")),
+                    )
+                    .await;
                     continue;
                 }
             };
@@ -154,7 +155,9 @@ impl Pipeline {
             tokio::task::spawn_blocking(move || audio.stop());
             tracing::info!("pipeline: audio stop requested");
             if let Err(e) = self.ipc.ensure_connected().await {
-                tracing::warn!("pipeline: daemon pre-connect failed ({e}), will retry at inject time");
+                tracing::warn!(
+                    "pipeline: daemon pre-connect failed ({e}), will retry at inject time"
+                );
             }
             if !released {
                 asr.abort();
@@ -265,9 +268,7 @@ impl Pipeline {
                     raw.zeroize();
                     send_event(
                         &events,
-                        PipelineEvent::Error(
-                            "Rate limit reached — try again in a moment.".into(),
-                        ),
+                        PipelineEvent::Error("Rate limit reached — try again in a moment.".into()),
                     )
                     .await;
                     continue;
@@ -276,9 +277,7 @@ impl Pipeline {
                     raw.zeroize();
                     send_event(
                         &events,
-                        PipelineEvent::Error(
-                            "OpenRouter is temporarily unavailable.".into(),
-                        ),
+                        PipelineEvent::Error("OpenRouter is temporarily unavailable.".into()),
                     )
                     .await;
                     continue;
@@ -300,9 +299,7 @@ impl Pipeline {
             if text.trim().is_empty() {
                 send_event(
                     &events,
-                    PipelineEvent::Error(
-                        "No speech detected. Try speaking more clearly.".into(),
-                    ),
+                    PipelineEvent::Error("No speech detected. Try speaking more clearly.".into()),
                 )
                 .await;
                 text.zeroize();
@@ -323,7 +320,9 @@ impl Pipeline {
                 .await
                 {
                     Ok(Ok(s)) if s.success() => {}
-                    Ok(Ok(s)) => tracing::warn!("pipeline: windowfocus failed: exit={:?}", s.code()),
+                    Ok(Ok(s)) => {
+                        tracing::warn!("pipeline: windowfocus failed: exit={:?}", s.code())
+                    }
                     Ok(Err(e)) => tracing::warn!("pipeline: windowfocus error: {e}"),
                     Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
                 }

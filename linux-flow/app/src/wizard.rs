@@ -125,6 +125,7 @@ fn page_openrouter(
     model_entry.set_title("Model");
     let default_model = state.borrow().model.clone();
     model_entry.set_text(&default_model);
+    crate::model_suggest::attach_model_suggestions(&model_entry);
 
     let next = gtk4::Button::with_label("Next");
     next.set_sensitive(false);
