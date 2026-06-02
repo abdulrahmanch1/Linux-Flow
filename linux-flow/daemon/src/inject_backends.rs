@@ -1,4 +1,4 @@
-//! Low-level typing backends used by [`crate::paste_trigger::TextInjector`].
+//! Low-level typing backends used by [`crate::text_injector::TextInjector`].
 //! Each is stateless and reports failure so the injector can fall through to a
 //! lower tier without duplicating already-typed text.
 

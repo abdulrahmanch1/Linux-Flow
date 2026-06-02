@@ -19,24 +19,26 @@ pub enum TextInjector {
 impl TextInjector {
     pub fn new(display: DisplayServer) -> Self {
         match display {
-            DisplayServer::Wayland => match VirtualKeyboard::new() {
-                Some(vk) => {
-                    eprintln!("linux-flow-helper: text injector = wayland-vk");
-                    TextInjector::Wayland(vk)
-                }
-                None => {
-                    // zwp_virtual_keyboard_v1 unavailable (common on older GNOME).
-                    // If XWayland is running ($DISPLAY set), xdotool can reach
-                    // XWayland-hosted apps via XGetInputFocus.
-                    if std::env::var_os("DISPLAY").is_some() {
-                        eprintln!("linux-flow-helper: text injector = xdotool (wayland-vk unavailable, XWayland detected)");
-                        TextInjector::X11
-                    } else {
-                        eprintln!("linux-flow-helper: text injector = uinput (last-resort, ASCII only)");
-                        TextInjector::Uinput
+            DisplayServer::Wayland => {
+                match VirtualKeyboard::new() {
+                    Some(vk) => {
+                        eprintln!("linux-flow-helper: text injector = wayland-vk");
+                        TextInjector::Wayland(vk)
+                    }
+                    None => {
+                        // zwp_virtual_keyboard_v1 unavailable (common on older GNOME).
+                        // If XWayland is running ($DISPLAY set), xdotool can reach
+                        // XWayland-hosted apps via XGetInputFocus.
+                        if std::env::var_os("DISPLAY").is_some() {
+                            eprintln!("linux-flow-helper: text injector = xdotool (wayland-vk unavailable, XWayland detected)");
+                            TextInjector::X11
+                        } else {
+                            eprintln!("linux-flow-helper: text injector = uinput (last-resort, ASCII only)");
+                            TextInjector::Uinput
+                        }
                     }
                 }
-            },
+            }
             DisplayServer::X11 => {
                 eprintln!("linux-flow-helper: text injector = xdotool");
                 TextInjector::X11
@@ -89,7 +91,9 @@ impl TextInjector {
                 Ok(())
             }
             TextInjector::Uinput => {
-                eprintln!("linux-flow-helper: text injector = uinput (ASCII only, non-ASCII skipped)");
+                eprintln!(
+                    "linux-flow-helper: text injector = uinput (ASCII only, non-ASCII skipped)"
+                );
                 type_ascii_uinput(inner, text)
             }
         }

@@ -118,7 +118,10 @@ async fn handle_connection(
     })??;
 
     let response = match ipc_proto::decode_frame(&payload) {
-        Ok(IpcRequest::InjectText { mut text, x11_window }) => {
+        Ok(IpcRequest::InjectText {
+            mut text,
+            x11_window,
+        }) => {
             let inj = Arc::clone(&injector);
             let result = tokio::task::spawn_blocking(move || {
                 let r = inj.inject_text(&text, x11_window);

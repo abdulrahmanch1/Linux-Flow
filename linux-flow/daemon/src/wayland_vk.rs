@@ -1,51 +1,17 @@
-use std::{io::Write, os::fd::AsFd};
+use crate::vk_util::{detect_gap, keymap_fd, now_ms};
+use crate::{error::DaemonError, keymap};
+use std::os::fd::AsFd;
 use wayland_client::{
     protocol::{wl_registry, wl_seat},
     Connection, Dispatch, EventQueue, QueueHandle,
 };
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
-    zwp_virtual_keyboard_manager_v1 as vk_mgr,
-    zwp_virtual_keyboard_v1 as vk_proto,
+    zwp_virtual_keyboard_manager_v1 as vk_mgr, zwp_virtual_keyboard_v1 as vk_proto,
 };
-use crate::{error::DaemonError, keymap};
 
-const XKB_V1: u32 = 1;     // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
+const XKB_V1: u32 = 1; // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
-
-/// Per-event timestamp deltas (ms), as a `(press_gap, char_gap)` pair.
-///
-/// `press_gap` is the delta between a key's press and its own release. Too
-/// small and compositors coalesce the pair and drop the character; this is the
-/// value that protects against dropping. `char_gap` is the delta between one
-/// key's release and the next key's press — those are distinct keycodes that do
-/// not coalesce, so it can be near-zero to type fast without losing characters.
-/// Calibrated per compositor, and overridable via `LINUX_FLOW_VK_PRESS_GAP_MS`
-/// and `LINUX_FLOW_VK_CHAR_GAP_MS` for empirical tuning without a rebuild.
-fn detect_gap() -> (u32, u32) {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let (mut press_gap, mut char_gap) = if desktop.contains("cosmic") {
-        (8, 1) // smithay/cosmic-comp coalesces aggressively
-    } else if desktop.contains("gnome") {
-        (6, 1) // Mutter
-    } else {
-        (4, 1) // KDE/KWin, wlroots, and unknown — tolerate fast input
-    };
-    if let Some(v) = env_gap("LINUX_FLOW_VK_PRESS_GAP_MS") {
-        press_gap = v;
-    }
-    if let Some(v) = env_gap("LINUX_FLOW_VK_CHAR_GAP_MS") {
-        char_gap = v;
-    }
-    (press_gap, char_gap)
-}
-
-fn env_gap(name: &str) -> Option<u32> {
-    std::env::var(name).ok()?.trim().parse().ok()
-}
 
 struct VkState {
     seat: Option<wl_seat::WlSeat>,
@@ -53,9 +19,22 @@ struct VkState {
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for VkState {
-    fn event(s: &mut Self, r: &wl_registry::WlRegistry, ev: wl_registry::Event,
-             _: &(), _: &Connection, qh: &QueueHandle<Self>) {
-        let wl_registry::Event::Global { name, interface, version } = ev else { return };
+    fn event(
+        s: &mut Self,
+        r: &wl_registry::WlRegistry,
+        ev: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = ev
+        else {
+            return;
+        };
         match interface.as_str() {
             "wl_seat" => s.seat = Some(r.bind(name, version.min(7), qh, ())),
             "zwp_virtual_keyboard_manager_v1" => s.mgr = Some(r.bind(name, 1, qh, ())),
@@ -65,16 +44,37 @@ impl Dispatch<wl_registry::WlRegistry, ()> for VkState {
 }
 
 impl Dispatch<wl_seat::WlSeat, ()> for VkState {
-    fn event(_: &mut Self, _: &wl_seat::WlSeat, _: wl_seat::Event,
-             _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_seat::WlSeat,
+        _: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<vk_mgr::ZwpVirtualKeyboardManagerV1, ()> for VkState {
-    fn event(_: &mut Self, _: &vk_mgr::ZwpVirtualKeyboardManagerV1, _: vk_mgr::Event,
-             _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &vk_mgr::ZwpVirtualKeyboardManagerV1,
+        _: vk_mgr::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<vk_proto::ZwpVirtualKeyboardV1, ()> for VkState {
-    fn event(_: &mut Self, _: &vk_proto::ZwpVirtualKeyboardV1, _: vk_proto::Event,
-             _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &vk_proto::ZwpVirtualKeyboardV1,
+        _: vk_proto::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 pub struct VirtualKeyboard {
@@ -86,36 +86,10 @@ pub struct VirtualKeyboard {
     keyboard: vk_proto::ZwpVirtualKeyboardV1,
     press_gap: u32,
     char_gap: u32,
-}
-
-fn keymap_fd(km: &str) -> Result<std::fs::File, DaemonError> {
-    use std::os::unix::io::FromRawFd;
-    let name = c"vk-keymap";
-    // SAFETY: name is a valid C string literal; MFD_CLOEXEC is a documented flag.
-    let raw = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
-    if raw < 0 {
-        return Err(DaemonError::Io(std::io::Error::last_os_error()));
-    }
-    // SAFETY: raw is a valid fd returned by memfd_create.
-    let mut f = unsafe { std::fs::File::from_raw_fd(raw) };
-    f.write_all(km.as_bytes()).map_err(DaemonError::Io)?;
-    Ok(f)
-}
-
-fn now_ms() -> u32 {
-    use std::sync::OnceLock;
-    static EPOCH: OnceLock<u64> = OnceLock::new();
-    let abs_ms = {
-        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-        // SAFETY: ts is stack-allocated and valid; CLOCK_MONOTONIC never fails on Linux.
-        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
-        (ts.tv_sec as u64 * 1_000) + (ts.tv_nsec as u64 / 1_000_000)
-    };
-    // Anchor to the first call so the returned value starts near 0 regardless of
-    // system uptime. Without this, the cast to u32 overflows after ~49.7 days and
-    // produces timestamps compositors reject as out-of-order.
-    let epoch = *EPOCH.get_or_init(|| abs_ms);
-    (abs_ms.saturating_sub(epoch)) as u32
+    settle_ms: u32,
+    // True while the fixed base keymap is the device's active layout. A dynamic
+    // run displaces it; the next base run restores it lazily, off-cadence.
+    base_active: bool,
 }
 
 impl VirtualKeyboard {
@@ -127,17 +101,34 @@ impl VirtualKeyboard {
         let mut queue: EventQueue<VkState> = conn.new_event_queue();
         let qh = queue.handle();
         conn.display().get_registry(&qh, ());
-        let mut state = VkState { seat: None, mgr: None };
+        let mut state = VkState {
+            seat: None,
+            mgr: None,
+        };
         queue.roundtrip(&mut state).ok()?;
 
         let seat = state.seat.take()?;
         let mgr = state.mgr.take()?;
         let keyboard = mgr.create_virtual_keyboard(&seat, &qh, ());
 
-        // The keymap is uploaded per text run (it carries that run's characters),
-        // so no initial keymap is set here.
-        let (press_gap, char_gap) = detect_gap();
-        Some(Self { conn, queue, state, keyboard, press_gap, char_gap })
+        let (press_gap, char_gap, settle_ms) = detect_gap();
+        let mut vk = Self {
+            conn,
+            queue,
+            state,
+            keyboard,
+            press_gap,
+            char_gap,
+            settle_ms,
+            base_active: false,
+        };
+        // Upload the fixed ASCII base keymap once, here at daemon start — off the
+        // hot path, so its settle sleep costs nothing at hotkey time. ASCII runs
+        // then type against this stable layout with no per-run upload, so the
+        // focused client never resolves the first key against a stale layout.
+        // Best-effort: on failure, type_text falls back to the dynamic path.
+        vk.base_active = vk.set_keymap(&keymap::build_base_keymap()).is_ok();
+        Some(vk)
     }
 
     /// Uploads `km` as the active XKB keymap and blocks until the compositor has
@@ -156,44 +147,17 @@ impl VirtualKeyboard {
         Ok(())
     }
 
-    /// Types `text` into the focused window by generating, per run, a dynamic
-    /// XKB keymap whose keys are the run's exact characters, then emitting a
-    /// press/release pair per character. Layout-independent and Unicode-complete
-    /// (Arabic, emoji, CJK) — never touches the clipboard. Modifiers are only
-    /// reset to a known-empty state, never held.
+    /// Types `text` into the focused window, one press/release pair per char.
+    /// All-ASCII runs use the pre-uploaded base keymap with no per-run upload;
+    /// runs with other characters fall back to a dynamic keymap. Layout-
+    /// independent and Unicode-complete (Arabic, emoji, CJK) — never touches the
+    /// clipboard. Modifiers are only reset to a known-empty state, never held.
     pub fn type_text(&mut self, text: &str) -> Result<(), DaemonError> {
         let mut t = now_ms();
         for seg in keymap::segments(text) {
-            // First-seen order assigns each distinct char an evdev keycode `1..`.
-            let mut codes: std::collections::HashMap<char, u32> = std::collections::HashMap::new();
-            let mut uniq: Vec<char> = Vec::new();
-            for &c in &seg {
-                codes.entry(c).or_insert_with(|| {
-                    uniq.push(c);
-                    uniq.len() as u32
-                });
-            }
-            self.set_keymap(&keymap::build_keymap(&uniq))?;
-            // Sacrificial warm-up: compositors drop or misresolve the first key
-            // event after a keymap change, which otherwise eats or corrupts the
-            // segment's first character. This key maps to VoidSymbol, so it is
-            // harmless if not dropped. Roundtrip after it so the compositor fully
-            // processes the keymap and warm-up before the real characters arrive,
-            // never typing the first real character against a stale layout.
-            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_PRESSED);
-            t = t.wrapping_add(self.press_gap);
-            self.keyboard.key(t, keymap::WARMUP_EVDEV, KEY_RELEASED);
-            t = t.wrapping_add(self.press_gap);
-            self.queue
-                .roundtrip(&mut self.state)
-                .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
-            for &c in &seg {
-                if let Some(&code) = codes.get(&c) {
-                    self.keyboard.key(t, code, KEY_PRESSED);
-                    t = t.wrapping_add(self.press_gap);
-                    self.keyboard.key(t, code, KEY_RELEASED);
-                    t = t.wrapping_add(self.char_gap);
-                }
+            match base_codes(&seg) {
+                Some(codes) => self.type_base(&codes, &mut t)?,
+                None => self.type_dynamic(&seg, &mut t)?,
             }
         }
         self.conn
@@ -201,4 +165,102 @@ impl VirtualKeyboard {
             .map_err(|e| DaemonError::InjectionFailed(format!("wayland flush: {e}")))?;
         Ok(())
     }
+
+    /// Fast path for an all-ASCII run: types against the pre-uploaded base
+    /// keymap with no per-run keymap upload. Each character is still paced on the
+    /// wall clock by [`Self::emit_key`] so terminals receive it individually.
+    fn type_base(&mut self, codes: &[u32], t: &mut u32) -> Result<(), DaemonError> {
+        if !self.base_active {
+            // A prior dynamic run displaced the base layout; restore it once.
+            self.set_keymap(&keymap::build_base_keymap())?;
+            self.base_active = true;
+        }
+        self.warmup_and_settle(t)?;
+        for &code in codes {
+            self.emit_key(code, t)?;
+        }
+        Ok(())
+    }
+
+    /// Fallback for runs with non-ASCII characters: builds a per-run keymap and
+    /// roundtrips so the compositor processes it before the real keys arrive.
+    fn type_dynamic(&mut self, seg: &[char], t: &mut u32) -> Result<(), DaemonError> {
+        // First-seen order assigns each distinct char an evdev keycode `1..`.
+        let mut codes: std::collections::HashMap<char, u32> = std::collections::HashMap::new();
+        let mut uniq: Vec<char> = Vec::new();
+        for &c in seg {
+            codes.entry(c).or_insert_with(|| {
+                uniq.push(c);
+                uniq.len() as u32
+            });
+        }
+        self.set_keymap(&keymap::build_keymap(&uniq))?;
+        self.base_active = false; // base layout displaced by this run
+        self.warmup_and_settle(t)?;
+        for &c in seg {
+            if let Some(&code) = codes.get(&c) {
+                self.emit_key(code, t)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Emits one press/release pair, flushing after each event and pausing on the
+    /// wall clock so the focused client receives the character before the next
+    /// arrives. Terminals (cosmic-term, wezterm) silently drop keystrokes that
+    /// land in a single batch; the real sleeps pace delivery so each keystroke is
+    /// processed individually. The advancing `t` keeps the event timestamps
+    /// strictly ordered, which the press/release gaps also keep distinct so the
+    /// compositor never coalesces a pair.
+    fn emit_key(&mut self, code: u32, t: &mut u32) -> Result<(), DaemonError> {
+        self.keyboard.key(*t, code, KEY_PRESSED);
+        *t = t.wrapping_add(self.press_gap);
+        self.flush_and_pace(self.press_gap)?;
+        self.keyboard.key(*t, code, KEY_RELEASED);
+        *t = t.wrapping_add(self.char_gap);
+        self.flush_and_pace(self.char_gap)?;
+        Ok(())
+    }
+
+    /// Flushes pending key events to the compositor, then sleeps `gap_ms` of real
+    /// wall-clock time. Unlike advancing the event timestamp alone, this actually
+    /// spaces delivery — the fix that keeps terminals from dropping characters.
+    fn flush_and_pace(&self, gap_ms: u32) -> Result<(), DaemonError> {
+        self.conn
+            .flush()
+            .map_err(|e| DaemonError::InjectionFailed(format!("wayland flush: {e}")))?;
+        if gap_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(gap_ms as u64));
+        }
+        Ok(())
+    }
+
+    /// Emits one sacrificial warm-up key (VoidSymbol), flushes it via roundtrip,
+    /// then sleeps `settle_ms`. The warm-up is the first event that makes the
+    /// virtual keyboard the seat's active source, prompting the compositor to
+    /// broadcast our keymap to the focused client; the client then applies it
+    /// *asynchronously*. The roundtrip pushes the warm-up out, and the sleep
+    /// gives the client time to finish applying the keymap before the first real
+    /// character arrives — without it, that character resolves against the stale
+    /// layout (e.g. "sudo" → "§"). The warm-up also absorbs the compositor's
+    /// habit of dropping the first key event after a focus or keymap change.
+    fn warmup_and_settle(&mut self, t: &mut u32) -> Result<(), DaemonError> {
+        self.keyboard.key(*t, keymap::WARMUP_EVDEV, KEY_PRESSED);
+        *t = t.wrapping_add(self.press_gap);
+        self.keyboard.key(*t, keymap::WARMUP_EVDEV, KEY_RELEASED);
+        *t = t.wrapping_add(self.press_gap);
+        self.queue
+            .roundtrip(&mut self.state)
+            .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
+        if self.settle_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(self.settle_ms as u64));
+        }
+        Ok(())
+    }
+}
+
+/// Each segment char's fixed base-keymap evdev code, or `None` if any char is
+/// outside the base set (→ caller takes the dynamic path).
+fn base_codes(seg: &[char]) -> Option<Vec<u32>> {
+    seg.iter().map(|&c| keymap::base_evdev(c)).collect()
 }

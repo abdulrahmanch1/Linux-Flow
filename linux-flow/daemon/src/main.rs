@@ -2,11 +2,12 @@ mod error;
 mod inject_backends;
 mod keymap;
 mod keys;
-mod paste_trigger;
 mod scancode;
 mod server;
+mod text_injector;
 mod uinput;
 mod uinput_inner;
+mod vk_util;
 mod wayland_vk;
 
 use std::sync::Arc;
