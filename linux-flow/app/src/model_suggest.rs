@@ -1,14 +1,15 @@
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
 use gtk4::{glib, prelude::*};
-use libadwaita as adw;
+use libadwaita::{self as adw, prelude::*};
 
 const MAX_SUGGESTIONS: usize = 8;
 
 /// Attaches a live suggestion popover to a model-name entry. The field stays
 /// freely editable; suggestions come from OpenRouter's public model catalog,
 /// fetched once off the GTK thread and kept in memory only. If the fetch fails
-/// (e.g. no network) the field simply works without suggestions.
+/// (e.g. no network) the field stays usable for manual entry and a dimmed
+/// warning affix appears so the empty list reads as "offline", not "broken".
 pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     let ids: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -73,7 +74,20 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     ));
     entry.add_controller(focus);
 
-    spawn_fetch(ids);
+    spawn_fetch(entry, ids);
+}
+
+/// Marks the entry with a dimmed warning affix when the catalog could not be
+/// loaded, so an empty suggestion list reads as "offline" rather than "broken".
+/// The field stays fully usable—the model id can always be typed by hand.
+fn flag_unavailable(entry: &adw::EntryRow) {
+    let icon = gtk4::Image::from_icon_name("dialog-warning-symbolic");
+    icon.set_tooltip_text(Some(
+        "Couldn't load the model list (check your connection or API status). \
+         You can still type the model id manually.",
+    ));
+    icon.add_css_class("dim-label");
+    entry.add_suffix(&icon);
 }
 
 /// Pins the popover to the entry's bottom edge and matches its width, so the
@@ -128,27 +142,51 @@ fn refilter(list: &gtk4::ListBox, text: &str, ids: &[String]) -> usize {
     shown
 }
 
-fn spawn_fetch(ids: Rc<RefCell<Vec<String>>>) {
-    let (tx, rx) = mpsc::channel::<Vec<String>>();
+fn spawn_fetch(entry: &adw::EntryRow, ids: Rc<RefCell<Vec<String>>>) {
+    let (tx, rx) = mpsc::channel::<Result<Vec<String>, String>>();
     std::thread::spawn(move || {
-        if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        // Collapse every failure mode (runtime build, network, bad response)
+        // into a single string so the GTK side can surface one hint uniformly.
+        let outcome = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
-            if let Ok(list) = rt.block_on(crate::models::fetch_model_ids()) {
-                let _ = tx.send(list);
-            }
-        }
+            Ok(rt) => rt
+                .block_on(crate::models::fetch_model_ids())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let _ = tx.send(outcome);
     });
 
-    glib::timeout_add_local(std::time::Duration::from_millis(80), move || {
-        match rx.try_recv() {
-            Ok(list) => {
-                *ids.borrow_mut() = list;
-                glib::ControlFlow::Break
+    glib::timeout_add_local(
+        std::time::Duration::from_millis(80),
+        glib::clone!(
+            #[weak]
+            entry,
+            #[strong]
+            ids,
+            #[upgrade_or]
+            glib::ControlFlow::Break,
+            move || match rx.try_recv() {
+                Ok(Ok(list)) => {
+                    *ids.borrow_mut() = list;
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(msg)) => {
+                    tracing::warn!("model list fetch failed: {msg}");
+                    flag_unavailable(&entry);
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                // Worker dropped the sender without a result (panic / unexpected
+                // exit); treat it like any other failure rather than hanging.
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    tracing::warn!("model list fetch worker exited without a result");
+                    flag_unavailable(&entry);
+                    glib::ControlFlow::Break
+                }
             }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-        }
-    });
+        ),
+    );
 }
