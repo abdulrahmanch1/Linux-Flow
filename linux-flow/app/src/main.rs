@@ -11,7 +11,6 @@ mod pipeline;
 mod secrets;
 mod settings;
 mod tray;
-mod ui;
 mod wizard;
 mod wizard_complete;
 mod wizard_hotkey;
@@ -143,7 +142,7 @@ fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppErro
     }?;
     let mut pipeline = rt.block_on(pipeline::Pipeline::new(config))?;
 
-    rt.spawn(notifications::handle_events(events_rx, tray, None));
+    rt.spawn(notifications::handle_events(events_rx, tray));
     rt.spawn(async move { pipeline.run(hotkey, events_tx).await });
     rt.spawn(async move {
         quit_rx.recv().await;

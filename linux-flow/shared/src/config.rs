@@ -35,16 +35,10 @@ pub struct Soniox {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ui {
-    pub show_tray: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub general: General,
     pub llm: Llm,
     pub soniox: Soniox,
-    pub ui: Ui,
 }
 
 impl Default for Config {
@@ -60,7 +54,6 @@ impl Default for Config {
             soniox: Soniox {
                 language: "auto".into(),
             },
-            ui: Ui { show_tray: true },
         }
     }
 }
