@@ -1,11 +1,19 @@
-use std::path::PathBuf;
+#[path = "hotkey_evdev_hotplug.rs"]
+mod hotplug;
 
-use evdev::{Device, EventStream, EventType, InputEventKind, Key};
-use futures_util::StreamExt;
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Duration;
+
+use evdev::{Device, Key};
 use tokio::sync::mpsc;
 
 use crate::hotkey::{HotkeyError, HotkeyEvent};
+
+const STOP_POLL: Duration = Duration::from_millis(100);
 
 fn name_to_key(name: &str) -> Option<Key> {
     match name {
@@ -34,112 +42,63 @@ fn name_to_key(name: &str) -> Option<Key> {
     }
 }
 
-fn open_keyboards(key: Key) -> Vec<EventStream> {
-    let Ok(paths) = std::fs::read_dir("/dev/input") else {
-        return vec![];
-    };
-    paths
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("event"))
-        .filter_map(|e| Device::open(e.path()).ok())
-        .filter(|d| d.supported_keys().is_some_and(|k| k.contains(key)))
-        .filter_map(|d| d.into_event_stream().ok())
-        .collect()
-}
-
-async fn read_device(mut stream: EventStream, key: Key, tx: mpsc::Sender<HotkeyEvent>) {
-    while let Some(Ok(ev)) = stream.next().await {
-        if ev.event_type() != EventType::KEY {
-            continue;
-        }
-        let InputEventKind::Key(k) = ev.kind() else {
-            continue;
-        };
-        if k != key {
-            continue;
-        }
-        let hk = match ev.value() {
-            1 => HotkeyEvent::Pressed,
-            0 => HotkeyEvent::Released,
-            _ => continue,
-        };
-        if tx.send(hk).await.is_err() {
-            return;
-        }
-    }
-    // Stream ended (device disconnected) — task exits; inotify handles reconnect.
-}
-
-fn spawn_inotify(hotplug_tx: mpsc::Sender<PathBuf>) {
-    tokio::task::spawn_blocking(move || {
-        let (sync_tx, sync_rx) = std::sync::mpsc::channel();
-        let mut watcher = match RecommendedWatcher::new(sync_tx, notify::Config::default()) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!("inotify watcher failed to initialise: {e}");
-                return;
-            }
-        };
-        if let Err(e) = watcher.watch(
-            std::path::Path::new("/dev/input"),
-            RecursiveMode::NonRecursive,
-        ) {
-            tracing::warn!("inotify watch on /dev/input failed: {e}");
-            return;
-        }
-        for event in sync_rx {
-            let Ok(ev) = event else { continue };
-            if !matches!(ev.kind, EventKind::Create(_)) {
-                continue;
-            }
-            for path in ev.paths {
-                if path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("event"))
-                {
-                    let _ = hotplug_tx.blocking_send(path);
-                }
-            }
-        }
-    });
-}
-
 pub struct EvdevBackend;
 
 impl EvdevBackend {
-    pub async fn run(tx: mpsc::Sender<HotkeyEvent>, hotkey: &str) -> Result<(), HotkeyError> {
+    pub async fn run(
+        tx: mpsc::Sender<HotkeyEvent>,
+        hotkey: &str,
+        stop: Arc<AtomicBool>,
+    ) -> Result<(), HotkeyError> {
         let key = name_to_key(hotkey).ok_or(HotkeyError::EvdevUnsupported)?;
-        let streams = open_keyboards(key);
+        let streams = hotplug::open_keyboards(key);
         if streams.is_empty() {
             return Err(HotkeyError::EvdevUnsupported);
         }
 
         let (key_tx, mut key_rx) = mpsc::channel::<HotkeyEvent>(16);
         for stream in streams {
-            tokio::spawn(read_device(stream, key, key_tx.clone()));
+            tokio::spawn(hotplug::read_device(stream, key, key_tx.clone()));
         }
 
         let (hotplug_tx, mut hotplug_rx) = mpsc::channel::<PathBuf>(8);
-        spawn_inotify(hotplug_tx);
+        let inotify = hotplug::spawn_inotify(hotplug_tx, Arc::clone(&stop));
 
-        loop {
+        let result = loop {
             tokio::select! {
                 Some(ev) = key_rx.recv() => {
                     if tx.send(ev).await.is_err() {
-                        return Err(HotkeyError::StreamClosed);
+                        break Err(HotkeyError::StreamClosed);
                     }
                 }
                 Some(path) = hotplug_rx.recv() => {
                     if let Ok(dev) = Device::open(&path) {
                         if dev.supported_keys().is_some_and(|k| k.contains(key)) {
                             if let Ok(stream) = dev.into_event_stream() {
-                                tokio::spawn(read_device(stream, key, key_tx.clone()));
+                                tokio::spawn(hotplug::read_device(stream, key, key_tx.clone()));
                             }
                         }
                     }
                 }
+                // Poll the stop flag for a live reload. Dropping `key_tx`/`key_rx`
+                // on exit ends every `read_device` task (their `send` errors),
+                // closing the evdev devices.
+                _ = tokio::time::sleep(STOP_POLL) => {
+                    if stop.load(Ordering::Relaxed) {
+                        break Ok(());
+                    }
+                }
             }
+        };
+
+        // Confirm the inotify thread (and its fd) is gone before returning, so a
+        // reload never accumulates blocking threads.
+        if tokio::time::timeout(Duration::from_secs(2), inotify)
+            .await
+            .is_err()
+        {
+            tracing::warn!("evdev: inotify teardown timed out");
         }
+        result
     }
 }
