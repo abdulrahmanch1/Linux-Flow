@@ -62,14 +62,20 @@ async fn run_wayland_with_retry(
     tx: mpsc::Sender<HotkeyEvent>,
     hotkey: String,
     stop: Arc<AtomicBool>,
+    bound: Arc<AtomicBool>,
 ) -> Result<(), HotkeyError> {
     const MAX_ATTEMPTS: u32 = 5;
     const RETRY_DELAY: Duration = Duration::from_secs(2);
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match wayland_backend::WaylandBackend::run(tx.clone(), hotkey.clone(), Arc::clone(&stop))
-            .await
+        match wayland_backend::WaylandBackend::run(
+            tx.clone(),
+            hotkey.clone(),
+            Arc::clone(&stop),
+            Arc::clone(&bound),
+        )
+        .await
         {
             Ok(()) => return Ok(()),
             Err(e) if e.is_portal_setup() && attempt < MAX_ATTEMPTS => {
@@ -78,6 +84,45 @@ async fn run_wayland_with_retry(
             }
             Err(e) => return Err(e),
         }
+    }
+}
+
+/// Waits a short grace period for any parallel backend (e.g. the X11 thread) to
+/// raise `bound`, then—if nothing bound and we are not tearing down—reports a
+/// user-facing failure so the silent "hotkey does nothing" case becomes visible.
+/// Stays quiet during shutdown and whenever a backend did bind, avoiding false
+/// alarms when X11 succeeds while evdev is unavailable.
+async fn notify_if_unbound(
+    bound: &AtomicBool,
+    stop: &AtomicBool,
+    last_err: Option<HotkeyError>,
+    on_fail: &Option<mpsc::Sender<String>>,
+) {
+    const GRACE: Duration = Duration::from_millis(500);
+    if stop.load(Ordering::Relaxed) {
+        return;
+    }
+    tokio::time::sleep(GRACE).await;
+    if stop.load(Ordering::Relaxed) || bound.load(Ordering::Acquire) {
+        return;
+    }
+    if let Some(tx) = on_fail {
+        let _ = tx.send(failure_message(last_err)).await;
+    }
+}
+
+/// Builds the user-facing message for a fully failed hotkey chain. The common
+/// case—evdev rejected because the user isn't in the `input` group—gets an
+/// actionable hint; anything else falls back to the technical error.
+fn failure_message(last_err: Option<HotkeyError>) -> String {
+    match last_err {
+        Some(HotkeyError::EvdevUnsupported) => {
+            "Hotkey is not active. linux-flow could not register \
+             the push-to-talk key. Add your user to the 'input' group, then log out and back in."
+                .to_owned()
+        }
+        Some(e) => format!("Hotkey is not active: {e}. The push-to-talk key did not register."),
+        None => "Hotkey is not active. The push-to-talk key did not register.".to_owned(),
     }
 }
 
@@ -97,11 +142,15 @@ impl Drop for HotkeyManager {
 }
 
 impl HotkeyManager {
-    pub fn start(hotkey: &str) -> Result<Self, HotkeyError> {
+    pub fn start(hotkey: &str, on_fail: Option<mpsc::Sender<String>>) -> Result<Self, HotkeyError> {
         // raw_tx is shared by all backends; dedup_tx is what the pipeline reads.
         let (raw_tx, raw_rx) = mpsc::channel::<HotkeyEvent>(8);
         let (dedup_tx, dedup_rx) = mpsc::channel::<HotkeyEvent>(4);
         let stop = Arc::new(AtomicBool::new(false));
+        // Raised by whichever backend successfully binds/grabs the key, so the
+        // fallback chain can tell "nothing bound" (notify the user) apart from "a
+        // parallel backend bound it" (stay quiet).
+        let bound = Arc::new(AtomicBool::new(false));
 
         // Deduplicator: suppress consecutive identical events that arise when
         // multiple backends (e.g. X11 + evdev) are running simultaneously.
@@ -131,48 +180,70 @@ impl HotkeyManager {
         let parent = match display::detect() {
             DisplayServer::Wayland => {
                 let stop = Arc::clone(&stop);
+                let bound = Arc::clone(&bound);
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        run_wayland_with_retry(raw_tx.clone(), hotkey.clone(), Arc::clone(&stop))
-                            .await
+                    if let Err(e) = run_wayland_with_retry(
+                        raw_tx.clone(),
+                        hotkey.clone(),
+                        Arc::clone(&stop),
+                        Arc::clone(&bound),
+                    )
+                    .await
                     {
                         tracing::warn!("wayland portal unavailable ({e}), trying X11 + evdev");
                         if std::env::var_os("DISPLAY").is_some() {
                             let tx = raw_tx.clone();
                             let hk = hotkey.clone();
                             let s = Arc::clone(&stop);
+                            let b = Arc::clone(&bound);
                             std::thread::spawn(move || {
-                                if let Err(e) = x11_backend::X11Backend::run(tx, &hk, s) {
+                                if let Err(e) = x11_backend::X11Backend::run(tx, &hk, s, b) {
                                     tracing::warn!("x11 exited: {e}");
                                 }
                             });
                         }
-                        if let Err(e) =
-                            evdev_backend::EvdevBackend::run(raw_tx, &hotkey, stop).await
-                        {
+                        let stop_n = Arc::clone(&stop);
+                        let evdev = evdev_backend::EvdevBackend::run(
+                            raw_tx,
+                            &hotkey,
+                            stop,
+                            Arc::clone(&bound),
+                        )
+                        .await;
+                        if let Err(e) = &evdev {
                             tracing::error!("evdev fallback exited: {e}");
                         }
+                        notify_if_unbound(&bound, &stop_n, evdev.err(), &on_fail).await;
                     }
                 })
             }
             DisplayServer::X11 => {
                 let stop = Arc::clone(&stop);
+                let bound = Arc::clone(&bound);
                 tokio::spawn(async move {
                     let tx = raw_tx.clone();
                     let hk = hotkey.clone();
                     let s = Arc::clone(&stop);
+                    let b = Arc::clone(&bound);
                     let result = tokio::task::spawn_blocking(move || {
-                        x11_backend::X11Backend::run(tx, &hk, s)
+                        x11_backend::X11Backend::run(tx, &hk, s, b)
                     })
                     .await
                     .unwrap_or_else(|_| Err(HotkeyError::StreamClosed));
                     if let Err(e) = result {
                         tracing::warn!("x11 exited: {e}, trying evdev fallback");
-                        if let Err(e) =
-                            evdev_backend::EvdevBackend::run(raw_tx, &hotkey, stop).await
-                        {
+                        let stop_n = Arc::clone(&stop);
+                        let evdev = evdev_backend::EvdevBackend::run(
+                            raw_tx,
+                            &hotkey,
+                            stop,
+                            Arc::clone(&bound),
+                        )
+                        .await;
+                        if let Err(e) = &evdev {
                             tracing::error!("evdev fallback exited: {e}");
                         }
+                        notify_if_unbound(&bound, &stop_n, evdev.err(), &on_fail).await;
                     }
                 })
             }

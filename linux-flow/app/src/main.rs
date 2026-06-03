@@ -130,6 +130,7 @@ fn run_wizard() {
 fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppError> {
     let config = Config::load().unwrap_or_default();
     let (events_tx, events_rx) = tokio::sync::mpsc::channel(16);
+    let (hotkey_fail_tx, mut hotkey_fail_rx) = tokio::sync::mpsc::channel::<String>(1);
     let (quit_tx, mut quit_rx) = tokio::sync::mpsc::channel::<()>(1);
     let (settings_tx, settings_rx) = mpsc::sync_channel::<()>(1);
     let (about_tx, about_rx) = mpsc::sync_channel::<()>(1);
@@ -138,11 +139,21 @@ fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppErro
     let tray = rt.block_on(tray::spawn_tray(quit_tx, settings_tx, about_tx))?;
     let hotkey = {
         let _g = rt.enter();
-        hotkey::HotkeyManager::start(&config.general.hotkey)
+        hotkey::HotkeyManager::start(&config.general.hotkey, Some(hotkey_fail_tx))
     }?;
     let mut pipeline = rt.block_on(pipeline::Pipeline::new(config))?;
 
     rt.spawn(notifications::handle_events(events_rx, tray));
+    // Surface a fully failed hotkey chain through the existing event path
+    // (desktop notification + red tray) instead of letting it die in the logs.
+    let hotkey_events_tx = events_tx.clone();
+    rt.spawn(async move {
+        if let Some(msg) = hotkey_fail_rx.recv().await {
+            let _ = hotkey_events_tx
+                .send(pipeline::PipelineEvent::Error(msg))
+                .await;
+        }
+    });
     rt.spawn(async move { pipeline.run(hotkey, events_tx).await });
     rt.spawn(async move {
         quit_rx.recv().await;

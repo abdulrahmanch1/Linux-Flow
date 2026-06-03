@@ -49,12 +49,16 @@ impl EvdevBackend {
         tx: mpsc::Sender<HotkeyEvent>,
         hotkey: &str,
         stop: Arc<AtomicBool>,
+        bound: Arc<AtomicBool>,
     ) -> Result<(), HotkeyError> {
         let key = name_to_key(hotkey).ok_or(HotkeyError::EvdevUnsupported)?;
         let streams = hotplug::open_keyboards(key);
         if streams.is_empty() {
             return Err(HotkeyError::EvdevUnsupported);
         }
+
+        // Devices opened and being read — the key is live.
+        bound.store(true, Ordering::Release);
 
         let (key_tx, mut key_rx) = mpsc::channel::<HotkeyEvent>(16);
         for stream in streams {
