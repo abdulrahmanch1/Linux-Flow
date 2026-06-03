@@ -48,7 +48,7 @@ async fn reload_hotkey(
     events: &mpsc::Sender<PipelineEvent>,
 ) {
     hotkey.shutdown().await;
-    match HotkeyManager::start(new_key) {
+    match HotkeyManager::start(new_key, None) {
         Ok(fresh) => {
             *hotkey = fresh;
             tracing::info!("pipeline: hotkey reloaded to {new_key}");
@@ -56,7 +56,7 @@ async fn reload_hotkey(
         Err(e) => {
             tracing::warn!("pipeline: new hotkey '{new_key}' failed ({e}), restoring previous");
             let old_key = hotkey.key().to_owned();
-            match HotkeyManager::start(&old_key) {
+            match HotkeyManager::start(&old_key, None) {
                 Ok(restored) => *hotkey = restored,
                 Err(e2) => tracing::error!("pipeline: could not restore hotkey: {e2}"),
             }

@@ -63,6 +63,7 @@ impl X11Backend {
         tx: mpsc::Sender<HotkeyEvent>,
         hotkey: &str,
         stop: Arc<AtomicBool>,
+        bound: Arc<AtomicBool>,
     ) -> Result<(), HotkeyError> {
         // SAFETY: All X11 calls follow documented usage patterns;
         // return values are checked before dereferencing.
@@ -97,6 +98,9 @@ impl X11Backend {
             unsafe { XCloseDisplay(display) };
             return Err(crate::hotkey::HotkeyError::X11GrabFailed);
         }
+
+        // XGrabKey succeeded — the key is grabbed on the root window.
+        bound.store(true, Ordering::Release);
 
         let result = Self::event_loop(display, keycode, &tx, &stop);
 

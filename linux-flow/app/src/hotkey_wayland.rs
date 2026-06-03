@@ -21,6 +21,7 @@ impl WaylandBackend {
         tx: mpsc::Sender<HotkeyEvent>,
         hotkey: String,
         stop: Arc<AtomicBool>,
+        bound: Arc<AtomicBool>,
     ) -> Result<(), HotkeyError> {
         let shortcuts = tokio::time::timeout(SETUP_TIMEOUT, GlobalShortcuts::new())
             .await
@@ -39,6 +40,9 @@ impl WaylandBackend {
             )
             .await?
             .response()?;
+
+        // The compositor accepted the binding — the key is live.
+        bound.store(true, Ordering::Release);
 
         let mut activated = shortcuts.receive_activated().await?;
         let mut deactivated = shortcuts.receive_deactivated().await?;
