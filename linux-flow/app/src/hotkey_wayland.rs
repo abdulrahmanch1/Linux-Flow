@@ -1,3 +1,7 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
@@ -8,11 +12,16 @@ use crate::hotkey::{HotkeyError, HotkeyEvent};
 
 const SHORTCUT_ID: &str = "record";
 const SETUP_TIMEOUT: Duration = Duration::from_secs(3);
+const STOP_POLL: Duration = Duration::from_millis(100);
 
 pub struct WaylandBackend;
 
 impl WaylandBackend {
-    pub async fn run(tx: mpsc::Sender<HotkeyEvent>, hotkey: String) -> Result<(), HotkeyError> {
+    pub async fn run(
+        tx: mpsc::Sender<HotkeyEvent>,
+        hotkey: String,
+        stop: Arc<AtomicBool>,
+    ) -> Result<(), HotkeyError> {
         let shortcuts = tokio::time::timeout(SETUP_TIMEOUT, GlobalShortcuts::new())
             .await
             .map_err(|_| HotkeyError::SetupTimeout)??;
@@ -58,6 +67,14 @@ impl WaylandBackend {
                 ev = shortcuts_changed.next() => match ev {
                     Some(_) => tracing::debug!("global shortcut bindings changed by compositor"),
                     None => return Err(HotkeyError::StreamClosed),
+                },
+                // Poll the stop flag so a live hotkey reload can tear this loop
+                // down. Returning drops `session`/`shortcuts`, closing the
+                // portal session cleanly instead of leaking it.
+                _ = tokio::time::sleep(STOP_POLL) => {
+                    if stop.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
                 },
             }
         }

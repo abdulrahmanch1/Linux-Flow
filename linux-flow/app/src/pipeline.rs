@@ -37,6 +37,40 @@ async fn send_event(tx: &mpsc::Sender<PipelineEvent>, event: PipelineEvent) {
     }
 }
 
+/// Tears down the running hotkey backend and starts a fresh one bound to
+/// `new_key`. The old manager is fully stopped (and its resources awaited)
+/// before the new one starts, so no duplicate events or leaked sessions occur.
+/// If the new key cannot be bound, the previous key is restored and the user is
+/// notified rather than left with no working hotkey.
+async fn reload_hotkey(
+    hotkey: &mut HotkeyManager,
+    new_key: &str,
+    events: &mpsc::Sender<PipelineEvent>,
+) {
+    hotkey.shutdown().await;
+    match HotkeyManager::start(new_key) {
+        Ok(fresh) => {
+            *hotkey = fresh;
+            tracing::info!("pipeline: hotkey reloaded to {new_key}");
+        }
+        Err(e) => {
+            tracing::warn!("pipeline: new hotkey '{new_key}' failed ({e}), restoring previous");
+            let old_key = hotkey.key().to_owned();
+            match HotkeyManager::start(&old_key) {
+                Ok(restored) => *hotkey = restored,
+                Err(e2) => tracing::error!("pipeline: could not restore hotkey: {e2}"),
+            }
+            send_event(
+                events,
+                PipelineEvent::Error(format!(
+                    "Hotkey '{new_key}' is not supported — kept the previous one."
+                )),
+            )
+            .await;
+        }
+    }
+}
+
 pub struct Pipeline {
     config: Config,
     display: DisplayServer,
@@ -44,7 +78,7 @@ pub struct Pipeline {
     soniox_key: Zeroizing<String>,
     or_key: Zeroizing<String>,
     ipc: IpcClient,
-    config_rx: std::sync::mpsc::Receiver<Config>,
+    config_rx: mpsc::Receiver<Config>,
     _config_watcher: Option<notify::RecommendedWatcher>,
 }
 
@@ -58,13 +92,14 @@ impl Pipeline {
             .await
             .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
         let ipc = IpcClient::new();
-        let (config_tx, config_rx) = std::sync::mpsc::channel::<Config>();
+        let (config_tx, config_rx) = mpsc::channel::<Config>(4);
         let _config_watcher: Option<notify::RecommendedWatcher> = (|| {
             let path = Config::config_path().ok()?;
             let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if res.is_ok() {
                     if let Ok(fresh) = Config::load() {
-                        let _ = config_tx.send(fresh);
+                        // notify runs this in its own (non-async) thread.
+                        let _ = config_tx.blocking_send(fresh);
                     }
                 }
             })
@@ -86,7 +121,33 @@ impl Pipeline {
 
     pub async fn run(&mut self, mut hotkey: HotkeyManager, events: mpsc::Sender<PipelineEvent>) {
         loop {
-            if !matches!(hotkey.next().await, Some(HotkeyEvent::Pressed)) {
+            // Idle: watch the hotkey and live config changes together. Applying
+            // a hotkey change here — not mid-session — means a fresh key takes
+            // effect on the next press without restarting the app, while an
+            // in-progress recording is never cut short.
+            let pressed = loop {
+                tokio::select! {
+                    ev = hotkey.next() => match ev {
+                        Some(HotkeyEvent::Pressed) => break true,
+                        Some(HotkeyEvent::Released) => continue,
+                        None => break false,
+                    },
+                    Some(fresh) = self.config_rx.recv() => {
+                        let hotkey_changed =
+                            fresh.general.hotkey != self.config.general.hotkey;
+                        self.config = fresh;
+                        if hotkey_changed {
+                            reload_hotkey(
+                                &mut hotkey,
+                                &self.config.general.hotkey,
+                                &events,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            };
+            if !pressed {
                 break;
             }
 
@@ -106,9 +167,6 @@ impl Pipeline {
                     None
                 };
 
-            while let Ok(fresh) = self.config_rx.try_recv() {
-                self.config = fresh;
-            }
             let mut audio = AudioCapture::new();
             let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
                 Ok(triple) => triple,

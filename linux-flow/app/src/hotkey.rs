@@ -61,13 +61,16 @@ impl HotkeyError {
 async fn run_wayland_with_retry(
     tx: mpsc::Sender<HotkeyEvent>,
     hotkey: String,
+    stop: Arc<AtomicBool>,
 ) -> Result<(), HotkeyError> {
     const MAX_ATTEMPTS: u32 = 5;
     const RETRY_DELAY: Duration = Duration::from_secs(2);
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match wayland_backend::WaylandBackend::run(tx.clone(), hotkey.clone()).await {
+        match wayland_backend::WaylandBackend::run(tx.clone(), hotkey.clone(), Arc::clone(&stop))
+            .await
+        {
             Ok(()) => return Ok(()),
             Err(e) if e.is_portal_setup() && attempt < MAX_ATTEMPTS => {
                 tracing::warn!("wayland portal not ready ({e}), retry {attempt}/{MAX_ATTEMPTS}");
@@ -80,12 +83,16 @@ async fn run_wayland_with_retry(
 
 pub struct HotkeyManager {
     rx: mpsc::Receiver<HotkeyEvent>,
-    x11_stop: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    parent: Option<tokio::task::JoinHandle<()>>,
+    key: String,
 }
 
 impl Drop for HotkeyManager {
     fn drop(&mut self) {
-        self.x11_stop.store(true, Ordering::Relaxed);
+        // Safety net for the final process exit. A live reload uses `shutdown`
+        // instead, which also *awaits* the backend's actual teardown.
+        self.stop.store(true, Ordering::Relaxed);
     }
 }
 
@@ -94,7 +101,7 @@ impl HotkeyManager {
         // raw_tx is shared by all backends; dedup_tx is what the pipeline reads.
         let (raw_tx, raw_rx) = mpsc::channel::<HotkeyEvent>(8);
         let (dedup_tx, dedup_rx) = mpsc::channel::<HotkeyEvent>(4);
-        let x11_stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
 
         // Deduplicator: suppress consecutive identical events that arise when
         // multiple backends (e.g. X11 + evdev) are running simultaneously.
@@ -120,11 +127,15 @@ impl HotkeyManager {
         });
 
         let hotkey = hotkey.to_owned();
-        match display::detect() {
+        let key = hotkey.clone();
+        let parent = match display::detect() {
             DisplayServer::Wayland => {
-                let stop = Arc::clone(&x11_stop);
+                let stop = Arc::clone(&stop);
                 tokio::spawn(async move {
-                    if let Err(e) = run_wayland_with_retry(raw_tx.clone(), hotkey.clone()).await {
+                    if let Err(e) =
+                        run_wayland_with_retry(raw_tx.clone(), hotkey.clone(), Arc::clone(&stop))
+                            .await
+                    {
                         tracing::warn!("wayland portal unavailable ({e}), trying X11 + evdev");
                         if std::env::var_os("DISPLAY").is_some() {
                             let tx = raw_tx.clone();
@@ -136,14 +147,16 @@ impl HotkeyManager {
                                 }
                             });
                         }
-                        if let Err(e) = evdev_backend::EvdevBackend::run(raw_tx, &hotkey).await {
+                        if let Err(e) =
+                            evdev_backend::EvdevBackend::run(raw_tx, &hotkey, stop).await
+                        {
                             tracing::error!("evdev fallback exited: {e}");
                         }
                     }
-                });
+                })
             }
             DisplayServer::X11 => {
-                let stop = Arc::clone(&x11_stop);
+                let stop = Arc::clone(&stop);
                 tokio::spawn(async move {
                     let tx = raw_tx.clone();
                     let hk = hotkey.clone();
@@ -155,19 +168,45 @@ impl HotkeyManager {
                     .unwrap_or_else(|_| Err(HotkeyError::StreamClosed));
                     if let Err(e) = result {
                         tracing::warn!("x11 exited: {e}, trying evdev fallback");
-                        if let Err(e) = evdev_backend::EvdevBackend::run(raw_tx, &hotkey).await {
+                        if let Err(e) =
+                            evdev_backend::EvdevBackend::run(raw_tx, &hotkey, stop).await
+                        {
                             tracing::error!("evdev fallback exited: {e}");
                         }
                     }
-                });
+                })
             }
             DisplayServer::Unknown => return Err(HotkeyError::NoDisplay),
-        }
+        };
 
         Ok(Self {
             rx: dedup_rx,
-            x11_stop,
+            stop,
+            parent: Some(parent),
+            key,
         })
+    }
+
+    /// The hotkey this manager is currently bound to.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Stops every backend this manager started and *waits* for their teardown
+    /// (portal session, X display, evdev devices, inotify thread) before
+    /// returning, so a fresh manager can be started without leaking resources
+    /// or racing duplicate events. A guard timeout prevents hanging on a wedged
+    /// backend.
+    pub async fn shutdown(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.parent.take() {
+            if tokio::time::timeout(Duration::from_secs(2), handle)
+                .await
+                .is_err()
+            {
+                tracing::warn!("hotkey: backend teardown timed out");
+            }
+        }
     }
 
     pub async fn next(&mut self) -> Option<HotkeyEvent> {
