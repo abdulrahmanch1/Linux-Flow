@@ -1,4 +1,3 @@
-use std::sync::mpsc as stdmpsc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -8,13 +7,8 @@ use crate::{
 };
 
 /// Drives tray state and notifications from the pipeline event stream.
-/// Errors are forwarded to `toast_tx` when Some (a window is open); otherwise
-/// a desktop notification is sent via notify-send.
-pub async fn handle_events(
-    mut rx: mpsc::Receiver<PipelineEvent>,
-    tray: TrayHandle,
-    toast_tx: Option<stdmpsc::SyncSender<String>>,
-) {
+/// Errors are surfaced as desktop notifications via notify-send.
+pub async fn handle_events(mut rx: mpsc::Receiver<PipelineEvent>, tray: TrayHandle) {
     while let Some(event) = rx.recv().await {
         match event {
             PipelineEvent::RecordingStarted => {
@@ -28,12 +22,7 @@ pub async fn handle_events(
             }
             PipelineEvent::Error(ref msg) => {
                 tray.set_state(TrayState::Error).await;
-                match &toast_tx {
-                    Some(tx) => {
-                        let _ = tx.send(msg.clone());
-                    }
-                    None => notify_desktop(msg).await,
-                }
+                notify_desktop(msg).await;
                 // Reset to Idle after 3 s so the tray doesn't stay red indefinitely.
                 let tray_reset = tray.clone();
                 tokio::spawn(async move {

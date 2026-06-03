@@ -28,12 +28,6 @@ impl std::fmt::Debug for IpcRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum IpcResponse {
-    Ok,
-    Err { reason: String },
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum FrameError {
     #[error("payload too large: {0} bytes (max 1 MB)")]
