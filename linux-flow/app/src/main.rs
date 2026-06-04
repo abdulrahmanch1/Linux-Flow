@@ -4,6 +4,7 @@ mod hotkey;
 mod hotkey_picker;
 mod inject;
 mod llm;
+mod model_cache;
 mod model_suggest;
 mod models;
 mod notifications;
