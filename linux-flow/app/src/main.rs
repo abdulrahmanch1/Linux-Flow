@@ -13,6 +13,7 @@ mod settings;
 mod tray;
 mod wizard;
 mod wizard_complete;
+mod wizard_flow;
 mod wizard_hotkey;
 mod wizard_hotkey_wayland;
 mod wizard_hotkey_x11;
@@ -79,8 +80,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if rt.block_on(wizard::needs_setup()) {
-        run_wizard();
+    let needs = rt.block_on(wizard_flow::setup_needs());
+    if needs.any() {
+        run_wizard(needs);
     }
     // On autostart the app can launch before the compositor's Wayland socket is
     // ready (notably on COSMIC). Wait for a display server so backend selection
@@ -118,9 +120,9 @@ fn init_tracing(debug: bool) {
     }
 }
 
-fn run_wizard() {
+fn run_wizard(needs: wizard_flow::SetupNeeds) {
     let ml = glib::MainLoop::new(None, false);
-    let win = wizard::build_wizard();
+    let win = wizard::build_wizard(needs);
     let ml_quit = ml.clone();
     win.connect_destroy(move |_| ml_quit.quit());
     win.present();
