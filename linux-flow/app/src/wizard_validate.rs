@@ -1,7 +1,92 @@
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
 use gtk4::glib;
+use libadwaita as adw;
 use zeroize::Zeroizing;
 
 use crate::key_check::{self, KeyCheckError, Provider};
+use crate::wizard::WizardState;
+use crate::wizard_flow::{self, Step};
+
+/// Freezes the page inputs, runs the key check off the GTK thread, and applies
+/// the verdict: a good key advances to `step`'s successor; a rejected one blocks
+/// with a message; an unverifiable one (offline) warns and arms `skip` so the
+/// next press proceeds. `set_inputs(false)` freezes every editable field plus
+/// Next as one unit — the single point that makes a mid-check edit (which could
+/// otherwise re-arm the form and double-advance) impossible to leave open.
+pub(crate) fn launch_verification(
+    provider: Provider,
+    key: Zeroizing<String>,
+    status: gtk4::Label,
+    set_inputs: Rc<dyn Fn(bool)>,
+    skip: Rc<Cell<bool>>,
+    state: Rc<RefCell<WizardState>>,
+    nav: adw::NavigationView,
+) {
+    set_inputs(false);
+    status.set_text("Verifying key…");
+
+    // Each provider's key is collected on exactly one page, so the page to
+    // advance from is fully determined by the provider.
+    let step = match provider {
+        Provider::Soniox => Step::Soniox,
+        Provider::OpenRouter => Step::OpenRouter,
+    };
+    let advance = {
+        let state = Rc::clone(&state);
+        let nav = nav.clone();
+        move || wizard_flow::advance(step, Rc::clone(&state), nav.clone())
+    };
+    let reenable = {
+        let set_inputs = Rc::clone(&set_inputs);
+        move || set_inputs(true)
+    };
+
+    spawn_check(
+        provider,
+        key,
+        glib::clone!(
+            #[weak]
+            status,
+            #[strong]
+            skip,
+            move |verdict| apply_verdict(verdict, provider, &status, &skip, &reenable, &advance)
+        ),
+    );
+}
+
+/// Applies a key-check verdict. `reenable` restores the inputs frozen for the
+/// check on every path — including success — so navigating back to a verified
+/// page never lands on a dead, greyed-out form.
+fn apply_verdict(
+    verdict: Result<(), KeyCheckError>,
+    provider: Provider,
+    status: &gtk4::Label,
+    skip: &Cell<bool>,
+    reenable: &dyn Fn(),
+    advance: &dyn Fn(),
+) {
+    reenable();
+    match verdict {
+        Ok(()) => {
+            status.set_text("");
+            advance();
+        }
+        Err(KeyCheckError::Invalid) => {
+            status.set_text(&format!(
+                "{} API key is invalid. Check it and try again.",
+                provider.label()
+            ));
+        }
+        Err(KeyCheckError::Unreachable(_)) => {
+            skip.set(true);
+            status.set_text("Couldn't verify the key (offline?). Press Next again to continue.");
+        }
+    }
+}
 
 /// Runs a key check off the GTK thread and delivers the verdict back on it.
 ///

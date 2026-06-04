@@ -72,16 +72,65 @@ pub async fn check(provider: Provider, mut key: Zeroizing<String>) -> Result<(),
     auth.zeroize();
 
     let resp = resp.map_err(|e| KeyCheckError::Unreachable(e.to_string()))?;
-    let status = resp.status();
+    classify(resp.status())
+}
+
+/// Maps an HTTP status to a verdict. Only an explicit auth rejection (401/403)
+/// proves the key bad; success passes; everything else (5xx, 429, redirects)
+/// is inconclusive and must not be reported as an invalid key.
+fn classify(status: reqwest::StatusCode) -> Result<(), KeyCheckError> {
     if status.is_success() {
-        return Ok(());
+        Ok(())
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        Err(KeyCheckError::Invalid)
+    } else {
+        Err(KeyCheckError::Unreachable(format!(
+            "HTTP {}",
+            status.as_u16()
+        )))
     }
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(KeyCheckError::Invalid);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn success_is_valid() {
+        assert!(classify(StatusCode::OK).is_ok());
+        assert!(classify(StatusCode::NO_CONTENT).is_ok());
     }
-    // 5xx, 429, and anything else: we can't conclude the key is bad.
-    Err(KeyCheckError::Unreachable(format!(
-        "HTTP {}",
-        status.as_u16()
-    )))
+
+    #[test]
+    fn auth_rejection_is_invalid() {
+        assert!(matches!(
+            classify(StatusCode::UNAUTHORIZED),
+            Err(KeyCheckError::Invalid)
+        ));
+        assert!(matches!(
+            classify(StatusCode::FORBIDDEN),
+            Err(KeyCheckError::Invalid)
+        ));
+    }
+
+    #[test]
+    fn server_and_transient_errors_are_inconclusive() {
+        // A bad gateway, rate limit, or payment-required must never be reported
+        // as an invalid key — the key could be perfectly fine.
+        for code in [
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::PAYMENT_REQUIRED,
+        ] {
+            assert!(
+                matches!(classify(code), Err(KeyCheckError::Unreachable(_))),
+                "{code} should be inconclusive"
+            );
+        }
+    }
 }

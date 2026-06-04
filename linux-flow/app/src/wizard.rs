@@ -6,42 +6,23 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::key_check::{KeyCheckError, Provider};
+use crate::key_check::Provider;
 use crate::wizard_flow::{self, SetupNeeds, Step};
 use crate::wizard_validate;
 
-/// Applies a key-check verdict to the page: a good key advances; a rejected one
-/// blocks with a message; an unverifiable one (offline) warns and arms `skip` so
-/// the next Next press proceeds without re-checking.
-///
-/// `reenable` restores the inputs (key field + Next) that were frozen for the
-/// duration of the check. It runs on every path — including success — so that
-/// navigating back to a verified page never lands on a dead, greyed-out form.
-fn apply_verdict(
-    verdict: Result<(), KeyCheckError>,
-    provider: Provider,
-    status: &gtk4::Label,
-    skip: &Cell<bool>,
-    reenable: &dyn Fn(),
-    advance: &dyn Fn(),
-) {
-    reenable();
-    match verdict {
-        Ok(()) => {
-            status.set_text("");
-            advance();
+/// Bundles a page's editable widgets into one sensitivity switch. The verify
+/// flow flips them all off for the duration of a check and back on after, so a
+/// new field can never be added to a page yet forgotten in the freeze. Weak refs
+/// keep the switch from extending the widgets' lifetimes.
+fn inputs_switch<const N: usize>(widgets: [gtk4::Widget; N]) -> Rc<dyn Fn(bool)> {
+    let weaks: Vec<glib::WeakRef<gtk4::Widget>> = widgets.iter().map(|w| w.downgrade()).collect();
+    Rc::new(move |sensitive: bool| {
+        for w in &weaks {
+            if let Some(w) = w.upgrade() {
+                w.set_sensitive(sensitive);
+            }
         }
-        Err(KeyCheckError::Invalid) => {
-            status.set_text(&format!(
-                "{} API key is invalid. Check it and try again.",
-                provider.label()
-            ));
-        }
-        Err(KeyCheckError::Unreachable(_)) => {
-            skip.set(true);
-            status.set_text("Couldn't verify the key (offline?). Press Next again to continue.");
-        }
-    }
+    })
 }
 
 pub(crate) struct WizardState {
@@ -101,6 +82,10 @@ pub(crate) fn page_soniox(
     // any edit to the key clears it, forcing a fresh verification.
     let skip = Rc::new(Cell::new(false));
 
+    // Single switch for every input on this page, so the verify flow freezes and
+    // restores them as one unit and no field can be left live during a check.
+    let set_inputs = inputs_switch([entry.clone().upcast(), next.clone().upcast()]);
+
     entry.connect_changed(glib::clone!(
         #[weak]
         next,
@@ -124,8 +109,6 @@ pub(crate) fn page_soniox(
         #[weak]
         entry,
         #[weak]
-        next,
-        #[weak]
         status,
         #[weak]
         nav,
@@ -133,6 +116,8 @@ pub(crate) fn page_soniox(
         state,
         #[strong]
         skip,
+        #[strong]
+        set_inputs,
         move |_| {
             let key = Zeroizing::new(entry.text().trim().to_string());
             state.borrow_mut().soniox_key = key.clone();
@@ -140,44 +125,14 @@ pub(crate) fn page_soniox(
                 wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone());
                 return;
             }
-            // Freeze the field too, not just Next: an edit mid-check would
-            // re-arm the form and let a stale verdict advance with a key that no
-            // longer matches what is shown.
-            next.set_sensitive(false);
-            entry.set_sensitive(false);
-            status.set_text("Verifying key…");
-            let advance = {
-                let state = Rc::clone(&state);
-                let nav = nav.clone();
-                move || wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone())
-            };
-            let reenable = glib::clone!(
-                #[weak]
-                entry,
-                #[weak]
-                next,
-                move || {
-                    entry.set_sensitive(true);
-                    next.set_sensitive(true);
-                }
-            );
-            wizard_validate::spawn_check(
+            wizard_validate::launch_verification(
                 Provider::Soniox,
                 key,
-                glib::clone!(
-                    #[weak]
-                    status,
-                    #[strong]
-                    skip,
-                    move |verdict| apply_verdict(
-                        verdict,
-                        Provider::Soniox,
-                        &status,
-                        &skip,
-                        &reenable,
-                        &advance
-                    )
-                ),
+                status,
+                Rc::clone(&set_inputs),
+                Rc::clone(&skip),
+                Rc::clone(&state),
+                nav.clone(),
             );
         }
     ));
@@ -242,6 +197,14 @@ pub(crate) fn page_openrouter(
     // any edit to the key clears it, forcing a fresh verification.
     let skip = Rc::new(Cell::new(false));
 
+    // Single switch for every input on this page, so the verify flow freezes and
+    // restores them as one unit and no field can be left live during a check.
+    let set_inputs = inputs_switch([
+        key_entry.clone().upcast(),
+        model_entry.clone().upcast(),
+        next.clone().upcast(),
+    ]);
+
     model_entry.connect_changed(glib::clone!(
         #[weak]
         key_entry,
@@ -271,8 +234,6 @@ pub(crate) fn page_openrouter(
         #[weak]
         model_entry,
         #[weak]
-        next,
-        #[weak]
         status,
         #[weak]
         nav,
@@ -280,6 +241,8 @@ pub(crate) fn page_openrouter(
         state,
         #[strong]
         skip,
+        #[strong]
+        set_inputs,
         move |_| {
             let key = Zeroizing::new(key_entry.text().trim().to_string());
             {
@@ -294,49 +257,14 @@ pub(crate) fn page_openrouter(
                 wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
                 return;
             }
-            // Freeze every input, not just Next: an edit mid-check would re-arm
-            // the form (the model field's handler re-enables Next) and let a
-            // stale verdict — or a second concurrent check — advance, pushing
-            // the next page twice.
-            next.set_sensitive(false);
-            key_entry.set_sensitive(false);
-            model_entry.set_sensitive(false);
-            status.set_text("Verifying key…");
-            let advance = {
-                let state = Rc::clone(&state);
-                let nav = nav.clone();
-                move || wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone())
-            };
-            let reenable = glib::clone!(
-                #[weak]
-                key_entry,
-                #[weak]
-                model_entry,
-                #[weak]
-                next,
-                move || {
-                    key_entry.set_sensitive(true);
-                    model_entry.set_sensitive(true);
-                    next.set_sensitive(true);
-                }
-            );
-            wizard_validate::spawn_check(
+            wizard_validate::launch_verification(
                 Provider::OpenRouter,
                 key,
-                glib::clone!(
-                    #[weak]
-                    status,
-                    #[strong]
-                    skip,
-                    move |verdict| apply_verdict(
-                        verdict,
-                        Provider::OpenRouter,
-                        &status,
-                        &skip,
-                        &reenable,
-                        &advance
-                    )
-                ),
+                status,
+                Rc::clone(&set_inputs),
+                Rc::clone(&skip),
+                Rc::clone(&state),
+                nav.clone(),
             );
         }
     ));
