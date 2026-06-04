@@ -294,11 +294,13 @@ pub(crate) fn page_openrouter(
                 wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
                 return;
             }
-            // Freeze the field too, not just Next: an edit mid-check would
-            // re-arm the form and let a stale verdict advance with a key that no
-            // longer matches what is shown.
+            // Freeze every input, not just Next: an edit mid-check would re-arm
+            // the form (the model field's handler re-enables Next) and let a
+            // stale verdict — or a second concurrent check — advance, pushing
+            // the next page twice.
             next.set_sensitive(false);
             key_entry.set_sensitive(false);
+            model_entry.set_sensitive(false);
             status.set_text("Verifying key…");
             let advance = {
                 let state = Rc::clone(&state);
@@ -309,9 +311,12 @@ pub(crate) fn page_openrouter(
                 #[weak]
                 key_entry,
                 #[weak]
+                model_entry,
+                #[weak]
                 next,
                 move || {
                     key_entry.set_sensitive(true);
+                    model_entry.set_sensitive(true);
                     next.set_sensitive(true);
                 }
             );
