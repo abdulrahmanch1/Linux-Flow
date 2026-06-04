@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 const SAVED_KEY_PLACEHOLDER: &str = "••••••••••••";
 
 pub fn build_settings() -> adw::Window {
-    let cfg = Config::load().unwrap_or_default();
+    let cfg = crate::load_config_or_warn();
 
     let hotkey_picker = crate::hotkey_picker::HotkeyPicker::new(&cfg.general.hotkey);
     let lang_row = adw::EntryRow::new();
