@@ -35,7 +35,15 @@ pub async fn handle_events(mut rx: mpsc::Receiver<PipelineEvent>, tray: TrayHand
 }
 
 async fn notify_desktop(body: &str) {
-    let ok = tokio::process::Command::new("notify-send")
+    let body = body.to_owned();
+    let _ = tokio::task::spawn_blocking(move || notify_user_blocking(&body)).await;
+}
+
+/// Fires a one-off desktop notification from a synchronous context (startup,
+/// settings open) where no tokio runtime drives the event loop. Falls back to
+/// stderr when `notify-send` is missing or fails, so the message is never lost.
+pub fn notify_user_blocking(body: &str) {
+    let ok = std::process::Command::new("notify-send")
         .args([
             "--app-name=linux-flow",
             "--icon=dialog-warning",
@@ -43,7 +51,6 @@ async fn notify_desktop(body: &str) {
             body,
         ])
         .status()
-        .await
         .map(|s| s.success())
         .unwrap_or(false);
     if !ok {

@@ -127,8 +127,25 @@ fn run_wizard() {
     ml.run();
 }
 
+/// Loads config, surfacing a genuine read/parse failure to the user instead of
+/// silently resetting to defaults (which would mask lost settings). The file is
+/// left untouched so it stays recoverable; this run proceeds on defaults.
+pub(crate) fn load_config_or_warn() -> Config {
+    match Config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            tracing::error!("config load failed; using defaults this run: {e}");
+            notifications::notify_user_blocking(&format!(
+                "Couldn't read your settings — using defaults this run. \
+                 Your file was left untouched. ({e})"
+            ));
+            Config::default()
+        }
+    }
+}
+
 fn start_backend(rt: &Runtime, main_loop: &glib::MainLoop) -> Result<(), AppError> {
-    let config = Config::load().unwrap_or_default();
+    let config = load_config_or_warn();
     let (events_tx, events_rx) = tokio::sync::mpsc::channel(16);
     let (hotkey_fail_tx, mut hotkey_fail_rx) = tokio::sync::mpsc::channel::<String>(1);
     let (quit_tx, mut quit_rx) = tokio::sync::mpsc::channel::<()>(1);

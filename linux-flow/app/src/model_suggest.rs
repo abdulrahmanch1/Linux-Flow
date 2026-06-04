@@ -1,14 +1,25 @@
-use std::{cell::RefCell, rc::Rc, sync::mpsc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{mpsc, OnceLock},
+};
 
 use gtk4::{glib, prelude::*};
 use libadwaita::{self as adw, prelude::*};
 
 const MAX_SUGGESTIONS: usize = 8;
 
+/// Process-wide, in-memory catalog cache. The OpenRouter model list barely
+/// changes within a session, so the first successful fetch is reused by every
+/// later field instead of re-hitting the network on each Settings/wizard open.
+/// RAM-only and public data (model ids, no secrets); a restart refreshes it.
+static MODEL_CACHE: OnceLock<Vec<String>> = OnceLock::new();
+
 /// Attaches a live suggestion popover to a model-name entry. The field stays
 /// freely editable; suggestions come from OpenRouter's public model catalog,
-/// fetched once off the GTK thread and kept in memory only. If the fetch fails
-/// (e.g. no network) the field stays usable for manual entry and a dimmed
+/// fetched once off the GTK thread and cached in memory (see `MODEL_CACHE`) so
+/// later instances reuse it without re-hitting the network. If the fetch fails
+/// or returns nothing, the field stays usable for manual entry and a dimmed
 /// warning affix appears so the empty list reads as "offline", not "broken".
 pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     let ids: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
@@ -74,7 +85,12 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     ));
     entry.add_controller(focus);
 
-    spawn_fetch(entry, ids);
+    // Reuse the cached catalog when a previous fetch already succeeded; only
+    // hit the network (and risk a failure hint) when we have nothing yet.
+    match MODEL_CACHE.get() {
+        Some(cached) => *ids.borrow_mut() = cached.clone(),
+        None => spawn_fetch(entry, ids),
+    }
 }
 
 /// Marks the entry with a dimmed warning affix when the catalog could not be
@@ -160,7 +176,7 @@ fn spawn_fetch(entry: &adw::EntryRow, ids: Rc<RefCell<Vec<String>>>) {
     });
 
     glib::timeout_add_local(
-        std::time::Duration::from_millis(80),
+        std::time::Duration::from_millis(50),
         glib::clone!(
             #[weak]
             entry,
@@ -168,24 +184,35 @@ fn spawn_fetch(entry: &adw::EntryRow, ids: Rc<RefCell<Vec<String>>>) {
             ids,
             #[upgrade_or]
             glib::ControlFlow::Break,
-            move || match rx.try_recv() {
-                Ok(Ok(list)) => {
-                    *ids.borrow_mut() = list;
-                    glib::ControlFlow::Break
+            move || {
+                let result = match rx.try_recv() {
+                    Ok(result) => result,
+                    Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                    // Worker dropped the sender without a result (panic /
+                    // unexpected exit); fold it into the failure path.
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        Err("worker exited without a result".to_owned())
+                    }
+                };
+                match result {
+                    // Cache the catalog so later field instances reuse it; ids
+                    // only ever holds a clone of the cached slice.
+                    Ok(list) if !list.is_empty() => {
+                        *ids.borrow_mut() = MODEL_CACHE.get_or_init(|| list).clone();
+                    }
+                    // A hard failure and a successful-but-empty catalog both
+                    // leave the user with no suggestions—surface the same hint
+                    // and don't cache, so the next open retries.
+                    other => {
+                        let msg = match other {
+                            Err(msg) => msg,
+                            _ => "returned an empty catalog".to_owned(),
+                        };
+                        tracing::warn!("model list unavailable: {msg}");
+                        flag_unavailable(&entry);
+                    }
                 }
-                Ok(Err(msg)) => {
-                    tracing::warn!("model list fetch failed: {msg}");
-                    flag_unavailable(&entry);
-                    glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                // Worker dropped the sender without a result (panic / unexpected
-                // exit); treat it like any other failure rather than hanging.
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    tracing::warn!("model list fetch worker exited without a result");
-                    flag_unavailable(&entry);
-                    glib::ControlFlow::Break
-                }
+                glib::ControlFlow::Break
             }
         ),
     );
