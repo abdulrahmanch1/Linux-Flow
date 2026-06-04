@@ -1,9 +1,42 @@
 use gtk4::{glib, prelude::*};
 use libadwaita::{self as adw, prelude::*};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::key_check::{KeyCheckError, Provider};
 use crate::wizard_flow::{self, SetupNeeds, Step};
+use crate::wizard_validate;
+
+/// Applies a key-check verdict to the page: a good key advances; a rejected one
+/// blocks with a message; an unverifiable one (offline) warns and arms `skip` so
+/// the next Next press proceeds without re-checking.
+fn apply_verdict(
+    verdict: Result<(), KeyCheckError>,
+    provider: Provider,
+    next: &gtk4::Button,
+    status: &gtk4::Label,
+    skip: &Cell<bool>,
+    advance: &dyn Fn(),
+) {
+    match verdict {
+        Ok(()) => advance(),
+        Err(KeyCheckError::Invalid) => {
+            status.set_text(&format!(
+                "{} API key is invalid. Check it and try again.",
+                provider.label()
+            ));
+            next.set_sensitive(true);
+        }
+        Err(KeyCheckError::Unreachable(_)) => {
+            skip.set(true);
+            status.set_text("Couldn't verify the key (offline?). Press Next again to continue.");
+            next.set_sensitive(true);
+        }
+    }
+}
 
 pub(crate) struct WizardState {
     pub soniox_key: Zeroizing<String>,
@@ -50,14 +83,25 @@ pub(crate) fn page_soniox(
     let entry = adw::PasswordEntryRow::new();
     entry.set_title("Soniox API Key");
 
+    let status = gtk4::Label::new(None);
+    status.set_wrap(true);
+    status.set_xalign(0.0);
+
     let next = gtk4::Button::with_label("Next");
     next.set_sensitive(false);
     next.add_css_class("suggested-action");
 
+    // Set true after an unverifiable (offline) check so the next press proceeds;
+    // any edit to the key clears it, forcing a fresh verification.
+    let skip = Rc::new(Cell::new(false));
+
     entry.connect_changed(glib::clone!(
         #[weak]
         next,
+        #[strong]
+        skip,
         move |e| {
+            skip.set(false);
             next.set_sensitive(!e.text().is_empty());
         }
     ));
@@ -74,12 +118,49 @@ pub(crate) fn page_soniox(
         #[weak]
         entry,
         #[weak]
+        next,
+        #[weak]
+        status,
+        #[weak]
         nav,
         #[strong]
         state,
+        #[strong]
+        skip,
         move |_| {
             state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
-            wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone());
+            if skip.get() {
+                wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone());
+                return;
+            }
+            let key = Zeroizing::new(entry.text().to_string());
+            next.set_sensitive(false);
+            status.set_text("Verifying key…");
+            let advance = {
+                let state = Rc::clone(&state);
+                let nav = nav.clone();
+                move || wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone())
+            };
+            wizard_validate::spawn_check(
+                Provider::Soniox,
+                key,
+                glib::clone!(
+                    #[weak]
+                    next,
+                    #[weak]
+                    status,
+                    #[strong]
+                    skip,
+                    move |verdict| apply_verdict(
+                        verdict,
+                        Provider::Soniox,
+                        &next,
+                        &status,
+                        &skip,
+                        &advance
+                    )
+                ),
+            );
         }
     ));
 
@@ -96,6 +177,7 @@ pub(crate) fn page_soniox(
     body.set_margin_start(24);
     body.set_margin_end(24);
     body.append(&group);
+    body.append(&status);
     body.append(&next_row);
 
     let clamp = adw::Clamp::new();
@@ -129,10 +211,18 @@ pub(crate) fn page_openrouter(
     model_entry.set_text(&default_model);
     crate::model_suggest::attach_model_suggestions(&model_entry);
 
+    let status = gtk4::Label::new(None);
+    status.set_wrap(true);
+    status.set_xalign(0.0);
+
     let next = gtk4::Button::with_label("Next");
     next.add_css_class("suggested-action");
     // With no key field, the prefilled model already satisfies the form.
     next.set_sensitive(!need_key && !default_model.is_empty());
+
+    // Set true after an unverifiable (offline) check so the next press proceeds;
+    // any edit to the key clears it, forcing a fresh verification.
+    let skip = Rc::new(Cell::new(false));
 
     model_entry.connect_changed(glib::clone!(
         #[weak]
@@ -149,7 +239,10 @@ pub(crate) fn page_openrouter(
         model_entry,
         #[weak]
         next,
+        #[strong]
+        skip,
         move |e| {
+            skip.set(false);
             next.set_sensitive(!e.text().is_empty() && !model_entry.text().is_empty());
         }
     ));
@@ -160,15 +253,56 @@ pub(crate) fn page_openrouter(
         #[weak]
         model_entry,
         #[weak]
+        next,
+        #[weak]
+        status,
+        #[weak]
         nav,
         #[strong]
         state,
+        #[strong]
+        skip,
         move |_| {
-            if need_key {
-                state.borrow_mut().openrouter_key = Zeroizing::new(key_entry.text().to_string());
+            {
+                let mut st = state.borrow_mut();
+                if need_key {
+                    st.openrouter_key = Zeroizing::new(key_entry.text().to_string());
+                }
+                st.model = model_entry.text().to_string();
             }
-            state.borrow_mut().model = model_entry.text().to_string();
-            wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
+            // No key to check when resuming with a stored key; advance as before.
+            if !need_key || skip.get() {
+                wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
+                return;
+            }
+            let key = Zeroizing::new(key_entry.text().to_string());
+            next.set_sensitive(false);
+            status.set_text("Verifying key…");
+            let advance = {
+                let state = Rc::clone(&state);
+                let nav = nav.clone();
+                move || wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone())
+            };
+            wizard_validate::spawn_check(
+                Provider::OpenRouter,
+                key,
+                glib::clone!(
+                    #[weak]
+                    next,
+                    #[weak]
+                    status,
+                    #[strong]
+                    skip,
+                    move |verdict| apply_verdict(
+                        verdict,
+                        Provider::OpenRouter,
+                        &next,
+                        &status,
+                        &skip,
+                        &advance
+                    )
+                ),
+            );
         }
     ));
 
@@ -186,6 +320,7 @@ pub(crate) fn page_openrouter(
     body.set_margin_start(24);
     body.set_margin_end(24);
     body.append(&group);
+    body.append(&status);
     body.append(&next_row);
 
     let clamp = adw::Clamp::new();

@@ -3,6 +3,7 @@ mod audio;
 mod hotkey;
 mod hotkey_picker;
 mod inject;
+mod key_check;
 mod llm;
 mod model_suggest;
 mod models;
@@ -18,6 +19,7 @@ mod wizard_hotkey;
 mod wizard_hotkey_wayland;
 mod wizard_hotkey_x11;
 mod wizard_polkit;
+mod wizard_validate;
 
 use std::{process::ExitCode, sync::mpsc, time::Duration};
 
