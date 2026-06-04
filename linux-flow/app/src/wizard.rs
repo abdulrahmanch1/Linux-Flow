@@ -13,27 +13,33 @@ use crate::wizard_validate;
 /// Applies a key-check verdict to the page: a good key advances; a rejected one
 /// blocks with a message; an unverifiable one (offline) warns and arms `skip` so
 /// the next Next press proceeds without re-checking.
+///
+/// `reenable` restores the inputs (key field + Next) that were frozen for the
+/// duration of the check. It runs on every path — including success — so that
+/// navigating back to a verified page never lands on a dead, greyed-out form.
 fn apply_verdict(
     verdict: Result<(), KeyCheckError>,
     provider: Provider,
-    next: &gtk4::Button,
     status: &gtk4::Label,
     skip: &Cell<bool>,
+    reenable: &dyn Fn(),
     advance: &dyn Fn(),
 ) {
+    reenable();
     match verdict {
-        Ok(()) => advance(),
+        Ok(()) => {
+            status.set_text("");
+            advance();
+        }
         Err(KeyCheckError::Invalid) => {
             status.set_text(&format!(
                 "{} API key is invalid. Check it and try again.",
                 provider.label()
             ));
-            next.set_sensitive(true);
         }
         Err(KeyCheckError::Unreachable(_)) => {
             skip.set(true);
             status.set_text("Couldn't verify the key (offline?). Press Next again to continue.");
-            next.set_sensitive(true);
         }
     }
 }
@@ -128,25 +134,37 @@ pub(crate) fn page_soniox(
         #[strong]
         skip,
         move |_| {
-            state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
+            let key = Zeroizing::new(entry.text().trim().to_string());
+            state.borrow_mut().soniox_key = key.clone();
             if skip.get() {
                 wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone());
                 return;
             }
-            let key = Zeroizing::new(entry.text().to_string());
+            // Freeze the field too, not just Next: an edit mid-check would
+            // re-arm the form and let a stale verdict advance with a key that no
+            // longer matches what is shown.
             next.set_sensitive(false);
+            entry.set_sensitive(false);
             status.set_text("Verifying key…");
             let advance = {
                 let state = Rc::clone(&state);
                 let nav = nav.clone();
                 move || wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone())
             };
+            let reenable = glib::clone!(
+                #[weak]
+                entry,
+                #[weak]
+                next,
+                move || {
+                    entry.set_sensitive(true);
+                    next.set_sensitive(true);
+                }
+            );
             wizard_validate::spawn_check(
                 Provider::Soniox,
                 key,
                 glib::clone!(
-                    #[weak]
-                    next,
                     #[weak]
                     status,
                     #[strong]
@@ -154,9 +172,9 @@ pub(crate) fn page_soniox(
                     move |verdict| apply_verdict(
                         verdict,
                         Provider::Soniox,
-                        &next,
                         &status,
                         &skip,
+                        &reenable,
                         &advance
                     )
                 ),
@@ -263,10 +281,11 @@ pub(crate) fn page_openrouter(
         #[strong]
         skip,
         move |_| {
+            let key = Zeroizing::new(key_entry.text().trim().to_string());
             {
                 let mut st = state.borrow_mut();
                 if need_key {
-                    st.openrouter_key = Zeroizing::new(key_entry.text().to_string());
+                    st.openrouter_key = key.clone();
                 }
                 st.model = model_entry.text().to_string();
             }
@@ -275,20 +294,31 @@ pub(crate) fn page_openrouter(
                 wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
                 return;
             }
-            let key = Zeroizing::new(key_entry.text().to_string());
+            // Freeze the field too, not just Next: an edit mid-check would
+            // re-arm the form and let a stale verdict advance with a key that no
+            // longer matches what is shown.
             next.set_sensitive(false);
+            key_entry.set_sensitive(false);
             status.set_text("Verifying key…");
             let advance = {
                 let state = Rc::clone(&state);
                 let nav = nav.clone();
                 move || wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone())
             };
+            let reenable = glib::clone!(
+                #[weak]
+                key_entry,
+                #[weak]
+                next,
+                move || {
+                    key_entry.set_sensitive(true);
+                    next.set_sensitive(true);
+                }
+            );
             wizard_validate::spawn_check(
                 Provider::OpenRouter,
                 key,
                 glib::clone!(
-                    #[weak]
-                    next,
                     #[weak]
                     status,
                     #[strong]
@@ -296,9 +326,9 @@ pub(crate) fn page_openrouter(
                     move |verdict| apply_verdict(
                         verdict,
                         Provider::OpenRouter,
-                        &next,
                         &status,
                         &skip,
+                        &reenable,
                         &advance
                     )
                 ),
