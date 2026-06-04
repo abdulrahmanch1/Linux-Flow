@@ -18,12 +18,14 @@ pub(crate) fn spawn_finish(
     let openrouter_key: Zeroizing<String>;
     let model: String;
     let hotkey: String;
+    let needs;
     {
         let st = state.borrow();
         soniox_key = st.soniox_key.clone();
         openrouter_key = st.openrouter_key.clone();
         model = st.model.clone();
         hotkey = st.hotkey.clone();
+        needs = st.needs;
     }
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
@@ -34,12 +36,18 @@ pub(crate) fn spawn_finish(
             .map_err(|e| e.to_string())
             .and_then(|rt| {
                 rt.block_on(async {
-                    crate::secrets::store_key("soniox", &soniox_key)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    crate::secrets::store_key("openrouter", &openrouter_key)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    // Only write a key the user actually re-entered; skipping a
+                    // present key avoids clobbering it with an empty value.
+                    if needs.soniox_key {
+                        crate::secrets::store_key("soniox", &soniox_key)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if needs.openrouter_key {
+                        crate::secrets::store_key("openrouter", &openrouter_key)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
                     let mut cfg = Config::load().map_err(|e| e.to_string())?;
                     cfg.llm.model = model;
                     cfg.general.hotkey = hotkey;
