@@ -12,7 +12,8 @@ const MAX_SUGGESTIONS: usize = 8;
 /// Process-wide, in-memory catalog cache. The OpenRouter model list barely
 /// changes within a session, so the first successful fetch is reused by every
 /// later field instead of re-hitting the network on each Settings/wizard open.
-/// RAM-only and public data (model ids, no secrets); a restart refreshes it.
+/// Public data (model ids, no secrets). Across restarts the on-disk cache (see
+/// `model_cache`) takes over so suggestions keep working offline between runs.
 static MODEL_CACHE: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Attaches a live suggestion popover to a model-name entry. The field stays
@@ -85,11 +86,18 @@ pub fn attach_model_suggestions(entry: &adw::EntryRow) {
     ));
     entry.add_controller(focus);
 
-    // Reuse the cached catalog when a previous fetch already succeeded; only
-    // hit the network (and risk a failure hint) when we have nothing yet.
+    // Reuse the in-session catalog when a previous fetch already succeeded.
+    // Otherwise seed from the on-disk cache so suggestions appear immediately
+    // even offline, then refresh from the network in the background.
     match MODEL_CACHE.get() {
         Some(cached) => *ids.borrow_mut() = cached.clone(),
-        None => spawn_fetch(entry, ids),
+        None => {
+            let disk = crate::model_cache::load();
+            if !disk.is_empty() {
+                *ids.borrow_mut() = disk;
+            }
+            spawn_fetch(entry, ids);
+        }
     }
 }
 
@@ -195,21 +203,25 @@ fn spawn_fetch(entry: &adw::EntryRow, ids: Rc<RefCell<Vec<String>>>) {
                     }
                 };
                 match result {
-                    // Cache the catalog so later field instances reuse it; ids
-                    // only ever holds a clone of the cached slice.
+                    // Persist to disk for future runs and cache in memory for
+                    // later fields this run; ids only holds a clone of it.
                     Ok(list) if !list.is_empty() => {
+                        crate::model_cache::store(&list);
                         *ids.borrow_mut() = MODEL_CACHE.get_or_init(|| list).clone();
                     }
                     // A hard failure and a successful-but-empty catalog both
-                    // leave the user with no suggestions—surface the same hint
-                    // and don't cache, so the next open retries.
+                    // leave us with no fresh list, so don't cache and let the
+                    // next open retry. Only hint "offline" when we truly have
+                    // nothing to show—a stale disk list beats an empty popover.
                     other => {
                         let msg = match other {
                             Err(msg) => msg,
                             _ => "returned an empty catalog".to_owned(),
                         };
                         tracing::warn!("model list unavailable: {msg}");
-                        flag_unavailable(&entry);
+                        if ids.borrow().is_empty() {
+                            flag_unavailable(&entry);
+                        }
                     }
                 }
                 glib::ControlFlow::Break
