@@ -1,5 +1,6 @@
 mod asr;
 mod audio;
+mod gtk_async;
 mod hotkey;
 mod hotkey_picker;
 mod inject;

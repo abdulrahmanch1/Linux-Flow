@@ -102,53 +102,48 @@ fn spawn_pkcheck(status: gtk4::Label, next: gtk4::Button, auth_btn: gtk4::Button
         }
     };
     let process_arg = format!("{pid},{start_time},{uid}");
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    std::thread::spawn(move || {
-        let result = std::process::Command::new("pkcheck")
-            .args([
-                "--action-id",
-                POLKIT_ACTION,
-                "--process",
-                &process_arg,
-                "--allow-user-interaction",
-            ])
-            .status()
-            .map_err(|e| e.to_string())
-            .and_then(|s| {
-                if s.success() {
-                    Ok(())
-                } else {
-                    let code = s
-                        .code()
-                        .map_or_else(|| "signal".to_string(), |c| c.to_string());
-                    Err(format!("authorization denied (exit {code})"))
-                }
-            });
-        let _ = tx.send(result);
-    });
-
     let status_w = status.downgrade();
     let next_w = next.downgrade();
     let auth_btn_w = auth_btn.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let (Some(s), Some(n), Some(a)) =
-            (status_w.upgrade(), next_w.upgrade(), auth_btn_w.upgrade())
-        else {
-            return glib::ControlFlow::Break;
-        };
-        match rx.try_recv() {
-            Ok(Ok(())) => {
-                s.set_text("Authorization granted.");
-                n.set_sensitive(true);
-                glib::ControlFlow::Break
+    crate::gtk_async::run_worker(
+        move || {
+            std::process::Command::new("pkcheck")
+                .args([
+                    "--action-id",
+                    POLKIT_ACTION,
+                    "--process",
+                    &process_arg,
+                    "--allow-user-interaction",
+                ])
+                .status()
+                .map_err(|e| e.to_string())
+                .and_then(|s| {
+                    if s.success() {
+                        Ok(())
+                    } else {
+                        let code = s
+                            .code()
+                            .map_or_else(|| "signal".to_string(), |c| c.to_string());
+                        Err(format!("authorization denied (exit {code})"))
+                    }
+                })
+        },
+        move |result| {
+            let (Some(s), Some(n), Some(a)) =
+                (status_w.upgrade(), next_w.upgrade(), auth_btn_w.upgrade())
+            else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    s.set_text("Authorization granted.");
+                    n.set_sensitive(true);
+                }
+                Err(e) => {
+                    s.set_text(&e);
+                    a.set_sensitive(true);
+                }
             }
-            Ok(Err(e)) => {
-                s.set_text(&e.to_string());
-                a.set_sensitive(true);
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
-        }
-    });
+        },
+    );
 }
