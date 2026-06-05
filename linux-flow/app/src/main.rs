@@ -95,6 +95,11 @@ fn main() -> ExitCode {
     if let Err(e) = start_backend(&rt, &main_loop) {
         eprintln!("linux-flow: {e}");
         tracing::error!("{e}");
+        // Tell the user why we're quitting instead of vanishing. On autostart
+        // there is no console, so a startup failure — notably the keyring /
+        // Secret Service being unavailable, which the wizard can't preempt —
+        // would otherwise be entirely invisible.
+        notifications::notify_user_blocking(&format!("linux-flow couldn't start: {e}"));
         // Exit directly rather than returning: start_backend may have already
         // launched the hotkey backend (with its blocking tasks), and returning
         // here would deadlock Runtime::drop the same way Quit does — leaving the
