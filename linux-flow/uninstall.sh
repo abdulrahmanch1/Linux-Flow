@@ -64,6 +64,7 @@ remove_files() {
     rm_file sudo /etc/polkit-1/rules.d/50-linux-flow.rules
     rm_file sudo /usr/share/polkit-1/actions/org.linux-flow.policy
     rm_file sudo /etc/udev/rules.d/60-linux-flow-uinput.rules
+    rm_file sudo /etc/modules-load.d/linux-flow-uinput.conf
     rm_file sudo /usr/share/applications/linux-flow.desktop
 
     info "Removing user files..."
