@@ -48,8 +48,20 @@ pub enum HotkeyError {
 impl HotkeyError {
     /// Transient errors raised while the XDG GlobalShortcuts portal is still
     /// coming up — worth retrying before falling back to another backend.
+    ///
+    /// `PortalNotFound` is deliberately excluded: it means the portal service is
+    /// reachable but exposes no GlobalShortcuts frontend (e.g. COSMIC), which
+    /// never changes. Retrying it would burn the whole retry budget (~10 s) with
+    /// the hotkey unbound — every press in that window is silently lost — before
+    /// finally reaching the X11/evdev fallback. Treating it as non-transient
+    /// makes that fallback kick in immediately.
     fn is_portal_setup(&self) -> bool {
-        matches!(self, HotkeyError::SetupTimeout | HotkeyError::Portal(_))
+        match self {
+            HotkeyError::SetupTimeout => true,
+            HotkeyError::Portal(ashpd::Error::PortalNotFound(_)) => false,
+            HotkeyError::Portal(_) => true,
+            _ => false,
+        }
     }
 }
 
