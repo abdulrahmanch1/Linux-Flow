@@ -13,6 +13,13 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use zeroize::{Zeroize, Zeroizing};
 
+// Re-focusing the target window before injection normally completes in well
+// under a millisecond; a full second only ever elapsed when the window was
+// unresponsive, freezing the app on the release→inject path. Bound the wait
+// tightly: a healthy focus switch finishes far inside this window, and a stuck
+// one no longer stalls injection for a whole second.
+const FOCUS_SYNC_TIMEOUT: Duration = Duration::from_millis(300);
+
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
     RecordingStarted,
@@ -378,7 +385,7 @@ impl Pipeline {
             tracing::info!("pipeline: inject start");
             if let Some(win) = focused_win {
                 match tokio::time::timeout(
-                    Duration::from_secs(1),
+                    FOCUS_SYNC_TIMEOUT,
                     tokio::process::Command::new("xdotool")
                         .args(["windowfocus", "--sync", &win.to_string()])
                         .status(),
