@@ -179,14 +179,22 @@ impl Pipeline {
                     continue;
                 }
             };
+            // Wait for PipeWire to deliver its first capture callback. A real
+            // failure (init/connect/stream/pod error) drops the ready sender as
+            // capture_loop returns, resolving this immediately into the err
+            // branch below — so this timeout only bounds a healthy-but-slow cold
+            // start (busy box, VM, first press after launch), not error
+            // reporting. It is off the release→inject latency path, so a
+            // generous window costs nothing on the happy path while sparing a
+            // valid press from being rejected on a slow system.
             if !matches!(
-                tokio::time::timeout(Duration::from_secs(2), ready_rx).await,
+                tokio::time::timeout(Duration::from_secs(5), ready_rx).await,
                 Ok(Ok(()))
             ) {
                 let msg = if let Ok(e) = audio_err_rx.try_recv() {
                     format!("Audio capture failed: {e}")
                 } else {
-                    "Audio device not responding.".into()
+                    "Audio device didn't start in time — please try again.".into()
                 };
                 send_event(&events, PipelineEvent::Error(msg)).await;
                 continue;
