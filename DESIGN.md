@@ -24,7 +24,7 @@ Wispr Flow-style dictation for Linux. Cloud ASR + LLM rewrite, push-to-talk, way
 - Prefs: `~/.config/linux-flow/config.toml`
 - Secrets: libsecret (Secret Service)
 - No transcript persistence. Audio + transcripts in RAM, dropped after injection.
-- No telemetry. Logs to journald on `--debug` only.
+- No telemetry. Operational warnings/errors go to journald by default so silent failures stay diagnosable; `--debug` adds verbose tracing. Transcripts, audio, and API keys are never logged at any level.
 
 ## Distribution
 - `install.sh` (curl-pipe) + `uninstall.sh`
