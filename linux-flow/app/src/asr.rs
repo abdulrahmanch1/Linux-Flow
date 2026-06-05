@@ -12,7 +12,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 const SONIOX_URL: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-const STREAM_TIMEOUT: Duration = Duration::from_secs(30);
+// After EOS we bound *inactivity*, not total time: a healthy stream keeps
+// delivering messages until `finished` (sub-second normally), so this only
+// trips when the connection has genuinely stalled — freeing the UI fast
+// without cutting off a slow-but-progressing finalize.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
 
@@ -33,7 +37,7 @@ fn tls_connector() -> Connector {
 pub enum AsrError {
     #[error("connection timed out (3 s)")]
     ConnectTimeout,
-    #[error("stream timed out after EOS (30 s)")]
+    #[error("stream went idle after EOS (no response for 5 s)")]
     StreamTimeout,
     #[error("invalid Soniox API key (401)")]
     Unauthorized,
@@ -68,7 +72,8 @@ struct SonioxResponse {
 /// Connects to Soniox, streams PCM audio from `audio_rx`, sends EOS when the
 /// channel closes (hotkey released), then returns the final transcript.
 ///
-/// Timeouts: 3 s to establish the connection; 30 s from EOS to `finished`.
+/// Timeouts: 3 s to establish the connection; after EOS, the wait for
+/// `finished` is bounded by inactivity (5 s with no message), not a fixed cap.
 /// The shared TLS config enables session resumption on subsequent calls.
 pub async fn transcribe(
     mut api_key: Zeroizing<String>,
@@ -111,10 +116,16 @@ pub async fn transcribe(
     config_str.zeroize();
     sink.send(Message::Text(to_send)).await?;
 
+    // A bounded liveness channel: read_task pings it on every message so the
+    // post-EOS wait below can tell "slow but progressing" from "stalled".
+    let (activity_tx, mut activity_rx) = mpsc::channel::<()>(1);
+
     let read_task = tokio::spawn(async move {
         let mut stream = stream;
         let mut transcript = Zeroizing::new(String::new());
         while let Some(msg) = stream.next().await {
+            // Non-blocking liveness ping; a full channel already means "alive".
+            let _ = activity_tx.try_send(());
             let text = match msg {
                 Ok(Message::Text(t)) => t,
                 Ok(_) => continue,
@@ -161,15 +172,27 @@ pub async fn transcribe(
         read_task.abort();
         return Err(AsrError::WebSocket(e));
     }
-    tracing::info!("asr: EOS sent — waiting up to 30 s for finished");
+    tracing::info!("asr: EOS sent — waiting for finished (idle-bounded)");
     let abort = read_task.abort_handle();
 
-    let result = timeout(STREAM_TIMEOUT, read_task)
-        .await
-        .map_err(|_| {
-            abort.abort();
-            AsrError::StreamTimeout
-        })?
-        .map_err(|e| AsrError::Stream(e.to_string()))?;
-    result
+    // Wait for the transcript, resetting an idle window on every message. A
+    // stalled connection (no message for STREAM_IDLE_TIMEOUT) aborts promptly
+    // instead of freezing the UI on a long fixed cap, while a slow finalize
+    // that keeps sending messages is never cut off.
+    let mut read_task = read_task;
+    loop {
+        tokio::select! {
+            joined = &mut read_task => {
+                break joined.map_err(|e| AsrError::Stream(e.to_string()))?;
+            }
+            _ = activity_rx.recv() => {
+                // A message arrived (or the task ended); restart the idle window.
+                continue;
+            }
+            _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
+                abort.abort();
+                break Err(AsrError::StreamTimeout);
+            }
+        }
+    }
 }
