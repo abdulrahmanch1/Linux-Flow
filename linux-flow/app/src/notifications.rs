@@ -7,7 +7,8 @@ use crate::{
 };
 
 /// Drives tray state and notifications from the pipeline event stream.
-/// Errors are surfaced as desktop notifications via notify-send.
+/// Errors — and the raw-transcript fallback — are surfaced as desktop
+/// notifications via notify-send.
 pub async fn handle_events(mut rx: mpsc::Receiver<PipelineEvent>, tray: TrayHandle) {
     while let Some(event) = rx.recv().await {
         match event {
@@ -17,8 +18,14 @@ pub async fn handle_events(mut rx: mpsc::Receiver<PipelineEvent>, tray: TrayHand
             PipelineEvent::ProcessingStarted => {
                 tray.set_state(TrayState::Processing).await;
             }
-            PipelineEvent::TextInjected | PipelineEvent::LlmFallback => {
+            PipelineEvent::TextInjected => {
                 tray.set_state(TrayState::Idle).await;
+            }
+            PipelineEvent::LlmFallback => {
+                // The text was injected, so this is not an error state — but the
+                // user should know it skipped the rewrite and got the raw words.
+                tray.set_state(TrayState::Idle).await;
+                notify_desktop("Inserted the raw transcript — couldn't polish it this time.").await;
             }
             PipelineEvent::Error(ref msg) => {
                 tray.set_state(TrayState::Error).await;
