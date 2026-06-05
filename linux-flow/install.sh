@@ -16,6 +16,7 @@ _IS_UPDATE=0
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found — please install it first"; }
 info() { printf '=> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
 
 # ── rollback ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ install_files() {
     track "/usr/share/polkit-1/actions/org.linux-flow.policy"
     sudo install -Dm644 "$src/system/60-linux-flow-uinput.rules" /etc/udev/rules.d/60-linux-flow-uinput.rules
     track "/etc/udev/rules.d/60-linux-flow-uinput.rules"
+    sudo install -Dm644 "$src/system/linux-flow-uinput.conf"     /etc/modules-load.d/linux-flow-uinput.conf
+    track "/etc/modules-load.d/linux-flow-uinput.conf"
     sudo install -Dm644 "$src/system/linux-flow.desktop"         /usr/share/applications/linux-flow.desktop
     track "/usr/share/applications/linux-flow.desktop"
     install     -Dm644 "$src/system/linux-flow.desktop"         "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/linux-flow.desktop"
@@ -111,8 +114,21 @@ setup_uinput() {
         sudo usermod -aG input "$USER"
         changed=1
     fi
+    # Load uinput now so /dev/uinput exists without a reboot. The
+    # modules-load.d file installed above keeps it loaded across boots.
+    # A module built into the kernel makes this a successful no-op.
+    if ! sudo modprobe uinput 2>/dev/null; then
+        warn "Could not load the 'uinput' kernel module — text injection will not work."
+        warn "Your kernel may lack uinput support; check manually with: modprobe uinput"
+    fi
     sudo udevadm control --reload-rules
     sudo udevadm trigger
+    # Wait for the node + permissions to be applied so the check below doesn't
+    # race a slow udev queue and warn spuriously.
+    sudo udevadm settle 2>/dev/null || true
+    if [[ ! -e /dev/uinput ]]; then
+        warn "/dev/uinput is still missing after loading the module — text injection will not work."
+    fi
     if [[ $changed -eq 1 ]]; then
         _GROUPS_CHANGED=1
         printf '\n=> Group membership updated. Please log out and back in for changes to take effect.\n'
