@@ -78,6 +78,74 @@ async fn reload_hotkey(
     }
 }
 
+/// Returns the X11 window currently holding input focus, or `None` on a
+/// Wayland-native target. `getwindowfocus` uses XGetInputFocus — it works for
+/// XWayland apps on GNOME Wayland where `getactivewindow` (`_NET_ACTIVE_WINDOW`)
+/// fails. The root window (id 1) is excluded.
+async fn capture_focused_window(display: DisplayServer) -> Option<u64> {
+    if display == DisplayServer::X11 || std::env::var_os("DISPLAY").is_some() {
+        tokio::process::Command::new("xdotool")
+            .arg("getwindowfocus")
+            .output()
+            .await
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .filter(|&id| id > 1)
+    } else {
+        None
+    }
+}
+
+/// Maps a finished ASR transcription error into a user-facing message.
+fn map_asr_error(e: AsrError) -> String {
+    match e {
+        AsrError::ConnectTimeout | AsrError::StreamTimeout => {
+            "Could not connect to Soniox. Check your connection and API key.".to_owned()
+        }
+        AsrError::Unauthorized => {
+            "Soniox API key is invalid. Open Settings to update it.".to_owned()
+        }
+        AsrError::ServerError { code: 402, .. } => {
+            "Soniox balance exhausted — add funds at soniox.com.".to_owned()
+        }
+        AsrError::ServerError { code, message } => format!("Soniox error {code}: {message}"),
+        _ => "Speech recognition failed. Please try again.".to_owned(),
+    }
+}
+
+/// Re-focuses the captured window just before injection, so apps that ignore
+/// synthetic events on unfocused windows still receive the text. Best-effort:
+/// any failure is logged and injection proceeds via the captured `--window`.
+async fn refocus_window(win: u64) {
+    match tokio::time::timeout(
+        FOCUS_SYNC_TIMEOUT,
+        tokio::process::Command::new("xdotool")
+            .args(["windowfocus", "--sync", &win.to_string()])
+            .status(),
+    )
+    .await
+    {
+        Ok(Ok(s)) if s.success() => {}
+        Ok(Ok(s)) => tracing::warn!("pipeline: windowfocus failed: exit={:?}", s.code()),
+        Ok(Err(e)) => tracing::warn!("pipeline: windowfocus error: {e}"),
+        Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
+    }
+}
+
+/// Normalizes the trailing break before injection. Single-line mode strips any
+/// dangling newline so it never lands as a lone Enter (which would submit/run
+/// the text prematurely). Splitting mode appends exactly one newline so the
+/// final segment also sends, matching the earlier segments.
+fn normalize_for_injection(text: &str, message_splitting: bool) -> Zeroizing<String> {
+    let trimmed = text.trim_end_matches(['\n', '\r', ' ', '\t']);
+    if message_splitting {
+        Zeroizing::new(format!("{trimmed}\n"))
+    } else {
+        Zeroizing::new(trimmed.to_owned())
+    }
+}
+
 pub struct Pipeline {
     config: Config,
     display: DisplayServer,
@@ -126,6 +194,95 @@ impl Pipeline {
         })
     }
 
+    /// Rewrites `raw` through the LLM and maps every failure to a user event.
+    /// Returns the text to inject, or `None` when an error was already surfaced
+    /// and the caller should move on to the next press. `raw` is consumed and
+    /// zeroized on every path; on an empty LLM reply it falls back to the raw
+    /// transcript and emits `LlmFallback`.
+    async fn process_llm(
+        &mut self,
+        mut raw: Zeroizing<String>,
+        events: &mpsc::Sender<PipelineEvent>,
+    ) -> Option<Zeroizing<String>> {
+        let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
+        tracing::info!("pipeline: llm start");
+        let llm_res = self
+            .llm
+            .rewrite(
+                self.or_key.clone(),
+                &model,
+                &raw,
+                self.config.llm.message_splitting,
+            )
+            .await;
+        tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
+        let (mut text, fallback) = match llm_res {
+            Ok(t) => (t, false),
+            Err(LlmError::EmptyResponse) => (
+                std::mem::replace(&mut raw, Zeroizing::new(String::new())),
+                true,
+            ),
+            Err(LlmError::Unauthorized) => {
+                raw.zeroize();
+                let _ = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
+                    .await
+                    .map(|k| self.or_key = k);
+                send_event(
+                    events,
+                    PipelineEvent::Error(
+                        "OpenRouter API key is invalid. Open Settings to update it.".into(),
+                    ),
+                )
+                .await;
+                return None;
+            }
+            Err(LlmError::Http(429)) => {
+                raw.zeroize();
+                send_event(
+                    events,
+                    PipelineEvent::Error("Rate limit reached — try again in a moment.".into()),
+                )
+                .await;
+                return None;
+            }
+            Err(LlmError::Http(503)) => {
+                raw.zeroize();
+                send_event(
+                    events,
+                    PipelineEvent::Error("OpenRouter is temporarily unavailable.".into()),
+                )
+                .await;
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!("pipeline: llm error: {e}");
+                raw.zeroize();
+                send_event(
+                    events,
+                    PipelineEvent::Error(
+                        "Could not reach OpenRouter. Check your connection.".into(),
+                    ),
+                )
+                .await;
+                return None;
+            }
+        };
+        raw.zeroize();
+        if text.trim().is_empty() {
+            send_event(
+                events,
+                PipelineEvent::Error("No speech detected. Try speaking more clearly.".into()),
+            )
+            .await;
+            text.zeroize();
+            return None;
+        }
+        if fallback {
+            send_event(events, PipelineEvent::LlmFallback).await;
+        }
+        Some(text)
+    }
+
     pub async fn run(&mut self, mut hotkey: HotkeyManager, events: mpsc::Sender<PipelineEvent>) {
         loop {
             // Idle: watch the hotkey and live config changes together. Applying
@@ -158,21 +315,7 @@ impl Pipeline {
                 break;
             }
 
-            // `getwindowfocus` uses XGetInputFocus — works for XWayland apps on
-            // GNOME Wayland where `getactivewindow` (_NET_ACTIVE_WINDOW) fails.
-            let focused_win: Option<u64> =
-                if self.display == DisplayServer::X11 || std::env::var_os("DISPLAY").is_some() {
-                    tokio::process::Command::new("xdotool")
-                        .arg("getwindowfocus")
-                        .output()
-                        .await
-                        .ok()
-                        .and_then(|o| String::from_utf8(o.stdout).ok())
-                        .and_then(|s| s.trim().parse::<u64>().ok())
-                        .filter(|&id| id > 1) // exclude root window (id=1)
-                } else {
-                    None
-                };
+            let focused_win = capture_focused_window(self.display).await;
 
             let mut audio = AudioCapture::new();
             let (pcm_rx, audio_err_rx, ready_rx) = match audio.start() {
@@ -264,24 +407,7 @@ impl Pipeline {
             }
             let asr_result = asr_joined
                 .map_err(|_| "Speech recognition failed. Please try again.".to_owned())
-                .and_then(|r| {
-                    r.map_err(|e| match e {
-                        AsrError::ConnectTimeout | AsrError::StreamTimeout => {
-                            "Could not connect to Soniox. Check your connection and API key."
-                                .to_owned()
-                        }
-                        AsrError::Unauthorized => {
-                            "Soniox API key is invalid. Open Settings to update it.".to_owned()
-                        }
-                        AsrError::ServerError { code: 402, .. } => {
-                            "Soniox balance exhausted — add funds at soniox.com.".to_owned()
-                        }
-                        AsrError::ServerError { code, message } => {
-                            format!("Soniox error {code}: {message}")
-                        }
-                        _ => "Speech recognition failed. Please try again.".to_owned(),
-                    })
-                });
+                .and_then(|r| r.map_err(map_asr_error));
             let mut raw = match asr_result {
                 Ok(t) => t,
                 Err(msg) => {
@@ -304,115 +430,16 @@ impl Pipeline {
                 continue;
             }
 
-            let model =
-                std::env::var("LLM_MODEL").unwrap_or_else(|_| self.config.llm.model.clone());
-            tracing::info!("pipeline: llm start");
-            let llm_res = self
-                .llm
-                .rewrite(
-                    self.or_key.clone(),
-                    &model,
-                    &raw,
-                    self.config.llm.message_splitting,
-                )
-                .await;
-            tracing::info!("pipeline: llm done ok={}", llm_res.is_ok());
-            let (mut text, fallback) = match llm_res {
-                Ok(t) => (t, false),
-                Err(LlmError::EmptyResponse) => (
-                    std::mem::replace(&mut raw, Zeroizing::new(String::new())),
-                    true,
-                ),
-                Err(LlmError::Unauthorized) => {
-                    raw.zeroize();
-                    let _ = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
-                        .await
-                        .map(|k| self.or_key = k);
-                    send_event(
-                        &events,
-                        PipelineEvent::Error(
-                            "OpenRouter API key is invalid. Open Settings to update it.".into(),
-                        ),
-                    )
-                    .await;
-                    continue;
-                }
-                Err(LlmError::Http(429)) => {
-                    raw.zeroize();
-                    send_event(
-                        &events,
-                        PipelineEvent::Error("Rate limit reached — try again in a moment.".into()),
-                    )
-                    .await;
-                    continue;
-                }
-                Err(LlmError::Http(503)) => {
-                    raw.zeroize();
-                    send_event(
-                        &events,
-                        PipelineEvent::Error("OpenRouter is temporarily unavailable.".into()),
-                    )
-                    .await;
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!("pipeline: llm error: {e}");
-                    raw.zeroize();
-                    send_event(
-                        &events,
-                        PipelineEvent::Error(
-                            "Could not reach OpenRouter. Check your connection.".into(),
-                        ),
-                    )
-                    .await;
-                    continue;
-                }
-            };
-            raw.zeroize();
-            if text.trim().is_empty() {
-                send_event(
-                    &events,
-                    PipelineEvent::Error("No speech detected. Try speaking more clearly.".into()),
-                )
-                .await;
-                text.zeroize();
+            let Some(mut text) = self.process_llm(raw, &events).await else {
                 continue;
-            }
-            if fallback {
-                send_event(&events, PipelineEvent::LlmFallback).await;
-            }
+            };
 
             tracing::info!("pipeline: inject start");
             if let Some(win) = focused_win {
-                match tokio::time::timeout(
-                    FOCUS_SYNC_TIMEOUT,
-                    tokio::process::Command::new("xdotool")
-                        .args(["windowfocus", "--sync", &win.to_string()])
-                        .status(),
-                )
-                .await
-                {
-                    Ok(Ok(s)) if s.success() => {}
-                    Ok(Ok(s)) => {
-                        tracing::warn!("pipeline: windowfocus failed: exit={:?}", s.code())
-                    }
-                    Ok(Err(e)) => tracing::warn!("pipeline: windowfocus error: {e}"),
-                    Err(_) => tracing::warn!("pipeline: windowfocus timed out for window {win}"),
-                }
+                refocus_window(win).await;
             }
-            // Normalize the trailing break. Single-line mode strips any dangling
-            // newline so it never lands as a lone Enter (which would submit/run
-            // the text prematurely). Splitting mode appends exactly one newline so
-            // the final segment also sends, matching the earlier segments.
-            let trimmed = text.trim_end_matches(['\n', '\r', ' ', '\t']);
-            let with_break;
-            let to_inject = if self.config.llm.message_splitting {
-                with_break = Zeroizing::new(format!("{trimmed}\n"));
-                with_break.as_str()
-            } else {
-                trimmed
-            };
-            match self.ipc.inject_text(to_inject, focused_win).await {
+            let to_inject = normalize_for_injection(&text, self.config.llm.message_splitting);
+            match self.ipc.inject_text(&to_inject, focused_win).await {
                 Ok(()) => {
                     send_event(&events, PipelineEvent::TextInjected).await;
                     tracing::info!("pipeline: inject ok");
