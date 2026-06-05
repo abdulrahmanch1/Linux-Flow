@@ -129,18 +129,33 @@ pub(crate) fn page_soniox(
         skip,
         move |_| {
             state.borrow_mut().soniox_key = Zeroizing::new(entry.text().to_string());
+            // Persist the key to the keyring before moving on, so closing the
+            // wizard here doesn't lose it; resume then skips this page.
+            let store_and_advance = {
+                let state = Rc::clone(&state);
+                let nav = nav.clone();
+                let status = status.clone();
+                let next = next.clone();
+                move || {
+                    let key = state.borrow().soniox_key.clone();
+                    let state = Rc::clone(&state);
+                    let nav = nav.clone();
+                    crate::wizard_complete::spawn_store_key(
+                        "soniox",
+                        key,
+                        &status,
+                        &next,
+                        move || wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone()),
+                    );
+                }
+            };
             if skip.get() {
-                wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone());
+                store_and_advance();
                 return;
             }
             let key = Zeroizing::new(entry.text().to_string());
             next.set_sensitive(false);
             status.set_text("Verifying key…");
-            let advance = {
-                let state = Rc::clone(&state);
-                let nav = nav.clone();
-                move || wizard_flow::advance(Step::Soniox, Rc::clone(&state), nav.clone())
-            };
             wizard_validate::spawn_check(
                 Provider::Soniox,
                 key,
@@ -157,7 +172,7 @@ pub(crate) fn page_soniox(
                         &next,
                         &status,
                         &skip,
-                        &advance
+                        &store_and_advance
                     )
                 ),
             );
@@ -270,19 +285,46 @@ pub(crate) fn page_openrouter(
                 }
                 st.model = model_entry.text().to_string();
             }
+            // Persist a freshly entered key to the keyring before advancing so it
+            // survives an early close; the model lives in config and is written
+            // at Finish. When resuming with a stored key there is nothing to save.
+            let store_and_advance = {
+                let state = Rc::clone(&state);
+                let nav = nav.clone();
+                let status = status.clone();
+                let next = next.clone();
+                move || {
+                    let advance_state = Rc::clone(&state);
+                    let advance_nav = nav.clone();
+                    let advance = move || {
+                        wizard_flow::advance(
+                            Step::OpenRouter,
+                            Rc::clone(&advance_state),
+                            advance_nav.clone(),
+                        )
+                    };
+                    if need_key {
+                        let key = state.borrow().openrouter_key.clone();
+                        crate::wizard_complete::spawn_store_key(
+                            "openrouter",
+                            key,
+                            &status,
+                            &next,
+                            advance,
+                        );
+                    } else {
+                        advance();
+                    }
+                }
+            };
             // No key to check when resuming with a stored key; advance as before.
             if !need_key || skip.get() {
-                wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone());
+                store_and_advance();
                 return;
             }
             let key = Zeroizing::new(key_entry.text().to_string());
             next.set_sensitive(false);
             status.set_text("Verifying key…");
-            let advance = {
-                let state = Rc::clone(&state);
-                let nav = nav.clone();
-                move || wizard_flow::advance(Step::OpenRouter, Rc::clone(&state), nav.clone())
-            };
             wizard_validate::spawn_check(
                 Provider::OpenRouter,
                 key,
@@ -299,7 +341,7 @@ pub(crate) fn page_openrouter(
                         &next,
                         &status,
                         &skip,
-                        &advance
+                        &store_and_advance
                     )
                 ),
             );

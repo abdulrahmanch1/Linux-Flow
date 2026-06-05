@@ -6,6 +6,59 @@ use zeroize::Zeroizing;
 
 use crate::wizard::WizardState;
 
+/// Persists a single verified key to the keyring the moment the user advances
+/// past its page, so a wizard closed before "Finish" doesn't lose it — a resume
+/// then picks up only the pieces still missing. On success runs `on_stored`
+/// (which advances to the next page); on failure surfaces the error and
+/// re-enables the button to retry. Mirrors the spawn-thread + current-thread
+/// runtime + `glib::timeout_add_local` poll pattern used elsewhere here.
+pub(crate) fn spawn_store_key(
+    service: &'static str,
+    key: Zeroizing<String>,
+    status: &gtk4::Label,
+    next: &gtk4::Button,
+    on_stored: impl Fn() + 'static,
+) {
+    next.set_sensitive(false);
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())
+            .and_then(|rt| {
+                rt.block_on(async {
+                    crate::secrets::store_key(service, &key)
+                        .await
+                        .map_err(|e| e.to_string())
+                })
+            });
+        // key is Zeroized on drop here
+        let _ = tx.send(result);
+    });
+
+    let status_w = status.downgrade();
+    let next_w = next.downgrade();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        let (Some(s), Some(n)) = (status_w.upgrade(), next_w.upgrade()) else {
+            return glib::ControlFlow::Break;
+        };
+        match rx.try_recv() {
+            Ok(Ok(())) => {
+                on_stored();
+                glib::ControlFlow::Break
+            }
+            Ok(Err(e)) => {
+                s.set_text(&format!("Couldn't save the key: {e}"));
+                n.set_sensitive(true);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(_) => glib::ControlFlow::Break,
+        }
+    });
+}
+
 pub(crate) fn spawn_finish(
     state: Rc<RefCell<WizardState>>,
     next: gtk4::Button,
