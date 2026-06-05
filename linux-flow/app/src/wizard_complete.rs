@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gtk4::{glib, prelude::*};
+use gtk4::prelude::*;
 use linux_flow_shared::config::Config;
 use zeroize::Zeroizing;
 
@@ -20,43 +20,33 @@ pub(crate) fn spawn_store_key(
     on_stored: impl Fn() + 'static,
 ) {
     next.set_sensitive(false);
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    std::thread::spawn(move || {
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())
-            .and_then(|rt| {
-                rt.block_on(async {
+    let status_w = status.downgrade();
+    let next_w = next.downgrade();
+    crate::gtk_async::run_worker(
+        move || {
+            // key is zeroized on drop when this closure returns.
+            crate::gtk_async::block_on_new_rt(
+                async move {
                     crate::secrets::store_key(service, &key)
                         .await
                         .map_err(|e| e.to_string())
-                })
-            });
-        // key is Zeroized on drop here
-        let _ = tx.send(result);
-    });
-
-    let status_w = status.downgrade();
-    let next_w = next.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let (Some(s), Some(n)) = (status_w.upgrade(), next_w.upgrade()) else {
-            return glib::ControlFlow::Break;
-        };
-        match rx.try_recv() {
-            Ok(Ok(())) => {
-                on_stored();
-                glib::ControlFlow::Break
+                },
+                Err,
+            )
+        },
+        move |result: Result<(), String>| {
+            let (Some(s), Some(n)) = (status_w.upgrade(), next_w.upgrade()) else {
+                return;
+            };
+            match result {
+                Ok(()) => on_stored(),
+                Err(e) => {
+                    s.set_text(&format!("Couldn't save the key: {e}"));
+                    n.set_sensitive(true);
+                }
             }
-            Ok(Err(e)) => {
-                s.set_text(&format!("Couldn't save the key: {e}"));
-                n.set_sensitive(true);
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
-        }
-    });
+        },
+    );
 }
 
 pub(crate) fn spawn_finish(
@@ -81,14 +71,13 @@ pub(crate) fn spawn_finish(
         needs = st.needs;
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    std::thread::spawn(move || {
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())
-            .and_then(|rt| {
-                rt.block_on(async {
+    let next_w = next.downgrade();
+    let status_w = status.downgrade();
+    crate::gtk_async::run_worker(
+        move || {
+            // soniox_key and openrouter_key are zeroized on drop when this returns.
+            crate::gtk_async::block_on_new_rt(
+                async move {
                     // Only write a key the user actually re-entered; skipping a
                     // present key avoids clobbering it with an empty value.
                     if needs.soniox_key {
@@ -105,34 +94,27 @@ pub(crate) fn spawn_finish(
                     cfg.llm.model = model;
                     cfg.general.hotkey = hotkey;
                     cfg.save().map_err(|e| e.to_string())
-                })
-            });
-        // soniox_key and openrouter_key are Zeroized on drop here
-        let _ = tx.send(result);
-    });
-
-    let next_w = next.downgrade();
-    let status_w = status.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let (Some(n), Some(s)) = (next_w.upgrade(), status_w.upgrade()) else {
-            return glib::ControlFlow::Break;
-        };
-        match rx.try_recv() {
-            Ok(Ok(())) => {
-                if let Some(root) = n.root() {
-                    if let Ok(window) = root.downcast::<gtk4::Window>() {
-                        window.close();
+                },
+                Err,
+            )
+        },
+        move |result: Result<(), String>| {
+            let (Some(n), Some(s)) = (next_w.upgrade(), status_w.upgrade()) else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    if let Some(root) = n.root() {
+                        if let Ok(window) = root.downcast::<gtk4::Window>() {
+                            window.close();
+                        }
                     }
                 }
-                glib::ControlFlow::Break
+                Err(e) => {
+                    s.set_text(&format!("Error saving: {e}"));
+                    n.set_sensitive(true);
+                }
             }
-            Ok(Err(e)) => {
-                s.set_text(&format!("Error saving: {e}"));
-                n.set_sensitive(true);
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
-        }
-    });
+        },
+    );
 }

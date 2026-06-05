@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{mpsc, OnceLock},
-};
+use std::{cell::RefCell, rc::Rc, sync::OnceLock};
 
 use gtk4::{glib, prelude::*};
 use libadwaita::{self as adw, prelude::*};
@@ -167,65 +163,46 @@ fn refilter(list: &gtk4::ListBox, text: &str, ids: &[String]) -> usize {
 }
 
 fn spawn_fetch(entry: &adw::EntryRow, ids: Rc<RefCell<Vec<String>>>) {
-    let (tx, rx) = mpsc::channel::<Result<Vec<String>, String>>();
-    std::thread::spawn(move || {
+    let entry_w = entry.downgrade();
+    crate::gtk_async::run_worker(
         // Collapse every failure mode (runtime build, network, bad response)
         // into a single string so the GTK side can surface one hint uniformly.
-        let outcome = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt
-                .block_on(crate::models::fetch_model_ids())
-                .map_err(|e| e.to_string()),
-            Err(e) => Err(e.to_string()),
-        };
-        let _ = tx.send(outcome);
-    });
-
-    glib::timeout_add_local(
-        std::time::Duration::from_millis(50),
-        glib::clone!(
-            #[weak]
-            entry,
-            #[strong]
-            ids,
-            #[upgrade_or]
-            glib::ControlFlow::Break,
-            move || {
-                let result = match rx.try_recv() {
-                    Ok(result) => result,
-                    Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
-                    // Worker dropped the sender without a result (panic /
-                    // unexpected exit); fold it into the failure path.
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        Err("worker exited without a result".to_owned())
-                    }
-                };
-                match result {
-                    // Persist to disk for future runs and cache in memory for
-                    // later fields this run; ids only holds a clone of it.
-                    Ok(list) if !list.is_empty() => {
-                        crate::model_cache::store(&list);
-                        *ids.borrow_mut() = MODEL_CACHE.get_or_init(|| list).clone();
-                    }
-                    // A hard failure and a successful-but-empty catalog both
-                    // leave us with no fresh list, so don't cache and let the
-                    // next open retry. Only hint "offline" when we truly have
-                    // nothing to show—a stale disk list beats an empty popover.
-                    other => {
-                        let msg = match other {
-                            Err(msg) => msg,
-                            _ => "returned an empty catalog".to_owned(),
-                        };
-                        tracing::warn!("model list unavailable: {msg}");
-                        if ids.borrow().is_empty() {
-                            flag_unavailable(&entry);
-                        }
+        move || {
+            crate::gtk_async::block_on_new_rt(
+                async {
+                    crate::models::fetch_model_ids()
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                Err,
+            )
+        },
+        move |result: Result<Vec<String>, String>| {
+            let Some(entry) = entry_w.upgrade() else {
+                return;
+            };
+            match result {
+                // Persist to disk for future runs and cache in memory for later
+                // fields this run; ids only holds a clone of it.
+                Ok(list) if !list.is_empty() => {
+                    crate::model_cache::store(&list);
+                    *ids.borrow_mut() = MODEL_CACHE.get_or_init(|| list).clone();
+                }
+                // A hard failure and a successful-but-empty catalog both leave us
+                // with no fresh list, so don't cache and let the next open retry.
+                // Only hint "offline" when we truly have nothing to show — a stale
+                // disk list beats an empty popover.
+                other => {
+                    let msg = match other {
+                        Err(msg) => msg,
+                        _ => "returned an empty catalog".to_owned(),
+                    };
+                    tracing::warn!("model list unavailable: {msg}");
+                    if ids.borrow().is_empty() {
+                        flag_unavailable(&entry);
                     }
                 }
-                glib::ControlFlow::Break
             }
-        ),
+        },
     );
 }
