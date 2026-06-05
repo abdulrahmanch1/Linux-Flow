@@ -111,13 +111,21 @@ fn main() -> ExitCode {
 }
 
 fn init_tracing(debug: bool) {
-    if !debug {
-        return;
-    }
     use tracing_subscriber::prelude::*;
+    // Operational warnings and errors always reach journald so silent failures
+    // are diagnosable in normal autostart runs; --debug raises the level to
+    // include verbose pipeline tracing. No transcript, audio, or API-key data
+    // is ever emitted at any level.
+    let level = if debug {
+        tracing_subscriber::filter::LevelFilter::DEBUG
+    } else {
+        tracing_subscriber::filter::LevelFilter::WARN
+    };
     match tracing_journald::layer() {
         Ok(layer) => {
-            tracing_subscriber::registry().with(layer).init();
+            tracing_subscriber::registry()
+                .with(layer.with_filter(level))
+                .init();
         }
         Err(e) => eprintln!("journald unavailable: {e}"),
     }
