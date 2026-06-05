@@ -13,10 +13,13 @@ use zeroize::{Zeroize, Zeroizing};
 const SONIOX_URL: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 // After EOS we bound *inactivity*, not total time: a healthy stream keeps
-// delivering messages until `finished` (sub-second normally), so this only
-// trips when the connection has genuinely stalled — freeing the UI fast
-// without cutting off a slow-but-progressing finalize.
+// delivering messages until `finished` (sub-second normally), so this trips
+// fast when the connection has genuinely stalled, without cutting off a
+// slow-but-progressing finalize.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+// Absolute backstop: a stream that keeps sending yet never reports `finished`
+// would reset the idle window forever, so cap the total post-EOS wait too.
+const STREAM_MAX_WAIT: Duration = Duration::from_secs(30);
 
 static TLS_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
 
@@ -37,7 +40,7 @@ fn tls_connector() -> Connector {
 pub enum AsrError {
     #[error("connection timed out (3 s)")]
     ConnectTimeout,
-    #[error("stream went idle after EOS (no response for 5 s)")]
+    #[error("stream stalled after EOS (idle 5 s, or no result within 30 s)")]
     StreamTimeout,
     #[error("invalid Soniox API key (401)")]
     Unauthorized,
@@ -175,18 +178,26 @@ pub async fn transcribe(
     tracing::info!("asr: EOS sent — waiting for finished (idle-bounded)");
     let abort = read_task.abort_handle();
 
-    // Wait for the transcript, resetting an idle window on every message. A
-    // stalled connection (no message for STREAM_IDLE_TIMEOUT) aborts promptly
-    // instead of freezing the UI on a long fixed cap, while a slow finalize
-    // that keeps sending messages is never cut off.
+    // Wait for the transcript under two bounds. An idle window (no message for
+    // STREAM_IDLE_TIMEOUT) frees the UI fast when the connection stalls, and an
+    // absolute deadline (STREAM_MAX_WAIT) is a backstop so a stream that keeps
+    // sending yet never reports `finished` can't reset the idle window forever.
+    // `biased` polls the completion arm first, so a transcript that lands exactly
+    // on a timeout boundary always wins the tie instead of being discarded.
+    let deadline = tokio::time::Instant::now() + STREAM_MAX_WAIT;
     let mut read_task = read_task;
     loop {
         tokio::select! {
+            biased;
             joined = &mut read_task => {
                 break joined.map_err(|e| AsrError::Stream(e.to_string()))?;
             }
+            _ = tokio::time::sleep_until(deadline) => {
+                abort.abort();
+                break Err(AsrError::StreamTimeout);
+            }
             _ = activity_rx.recv() => {
-                // A message arrived (or the task ended); restart the idle window.
+                // A message arrived; restart the idle window (deadline is absolute).
                 continue;
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
