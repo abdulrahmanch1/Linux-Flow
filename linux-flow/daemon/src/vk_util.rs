@@ -22,21 +22,23 @@ use std::io::Write;
 /// observe when *it* has applied it. Without it some clients resolve the first
 /// keys against the stale layout, turning the run's first characters into a wrong
 /// glyph (e.g. "sudo" → "§").
+///
+/// The defaults are deliberately conservative and uniform across desktops. The
+/// underlying protocol (`zwp_virtual_keyboard_v1`) is fire-and-forget: there is
+/// no per-event acknowledgement, so any gap is a blind bet on how fast the
+/// focused client drains its event queue. Per-desktop magic numbers only ever
+/// guessed at that — they do not vary with the real bottleneck (client load), so
+/// the smallest values dropped characters under load on every desktop. A single
+/// safe baseline, paired with the periodic roundtrip in the typing loop (which
+/// genuinely adapts to compositor load), is more robust than per-name tuning.
 /// All three are overridable via `LINUX_FLOW_VK_PRESS_GAP_MS`,
 /// `LINUX_FLOW_VK_CHAR_GAP_MS`, and `LINUX_FLOW_VK_SETTLE_MS` for empirical
-/// tuning without a rebuild.
+/// tuning without a rebuild — drop `char_gap` on a fast machine to reclaim speed.
 pub(crate) fn detect_gap() -> (u32, u32, u32) {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let (mut press_gap, mut char_gap, mut settle_ms) = if desktop.contains("cosmic") {
-        (3, 6, 60) // cosmic-comp: terminals need genuine per-key pacing
-    } else if desktop.contains("gnome") {
-        (6, 6, 20) // Mutter
-    } else {
-        (4, 4, 15) // KDE/KWin, wlroots, and unknown — tolerate fast input
-    };
+    // Conservative baseline shared by all desktops. `char_gap` is the critical
+    // value — it widens the margin against the typing-rate vs. client-drain race
+    // that drops characters under load.
+    let (mut press_gap, mut char_gap, mut settle_ms) = (8, 12, 60);
     if let Some(v) = env_gap("LINUX_FLOW_VK_PRESS_GAP_MS") {
         press_gap = v;
     }

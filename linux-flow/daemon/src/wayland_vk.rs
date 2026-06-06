@@ -13,6 +13,14 @@ const XKB_V1: u32 = 1; // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
 const KEY_PRESSED: u32 = 1;
 const KEY_RELEASED: u32 = 0;
 
+/// Roundtrip with the compositor every this many characters. A roundtrip blocks
+/// until the compositor has processed everything sent so far, so it both bounds
+/// how large an event backlog can pile up and — because a busy compositor takes
+/// longer to answer — paces delivery in proportion to real load, unlike a fixed
+/// sleep. The only feedback `zwp_virtual_keyboard_v1` can offer is this
+/// compositor-side acknowledgement; the focused client's own queue stays opaque.
+const ROUNDTRIP_EVERY: usize = 16;
+
 struct VkState {
     seat: Option<wl_seat::WlSeat>,
     mgr: Option<vk_mgr::ZwpVirtualKeyboardManagerV1>,
@@ -176,8 +184,11 @@ impl VirtualKeyboard {
             self.base_active = true;
         }
         self.warmup_and_settle(t)?;
-        for &code in codes {
+        for (i, &code) in codes.iter().enumerate() {
             self.emit_key(code, t)?;
+            if (i + 1) % ROUNDTRIP_EVERY == 0 {
+                self.sync()?;
+            }
         }
         Ok(())
     }
@@ -197,9 +208,12 @@ impl VirtualKeyboard {
         self.set_keymap(&keymap::build_keymap(&uniq))?;
         self.base_active = false; // base layout displaced by this run
         self.warmup_and_settle(t)?;
-        for &c in seg {
+        for (i, &c) in seg.iter().enumerate() {
             if let Some(&code) = codes.get(&c) {
                 self.emit_key(code, t)?;
+            }
+            if (i + 1) % ROUNDTRIP_EVERY == 0 {
+                self.sync()?;
             }
         }
         Ok(())
@@ -232,6 +246,17 @@ impl VirtualKeyboard {
         if gap_ms > 0 {
             std::thread::sleep(std::time::Duration::from_millis(gap_ms as u64));
         }
+        Ok(())
+    }
+
+    /// Blocks until the compositor has processed every request sent so far. Used
+    /// periodically inside the typing loop so the event backlog stays bounded and
+    /// delivery paces itself against real compositor load instead of a fixed
+    /// sleep alone — the only acknowledgement this protocol exposes.
+    fn sync(&mut self) -> Result<(), DaemonError> {
+        self.queue
+            .roundtrip(&mut self.state)
+            .map_err(|e| DaemonError::InjectionFailed(format!("wayland roundtrip: {e}")))?;
         Ok(())
     }
 
