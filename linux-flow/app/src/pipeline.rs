@@ -454,3 +454,83 @@ impl Pipeline {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_strips_trailing_break() {
+        // A dangling newline must never survive — it would land as a lone Enter
+        // and submit the text prematurely.
+        let out = normalize_for_injection("hello world\n", false);
+        assert_eq!(&*out, "hello world");
+    }
+
+    #[test]
+    fn single_line_strips_mixed_trailing_whitespace() {
+        let out = normalize_for_injection("done \t\r\n ", false);
+        assert_eq!(&*out, "done");
+    }
+
+    #[test]
+    fn single_line_keeps_interior_newlines() {
+        // Only the trailing break is stripped; interior structure is preserved.
+        let out = normalize_for_injection("line a\nline b\n", false);
+        assert_eq!(&*out, "line a\nline b");
+    }
+
+    #[test]
+    fn splitting_appends_exactly_one_newline() {
+        let out = normalize_for_injection("send me", true);
+        assert_eq!(&*out, "send me\n");
+    }
+
+    #[test]
+    fn splitting_collapses_multiple_trailing_breaks_to_one() {
+        let out = normalize_for_injection("msg\n\n\n", true);
+        assert_eq!(&*out, "msg\n");
+    }
+
+    #[test]
+    fn map_asr_error_timeouts_share_connectivity_message() {
+        let connect = map_asr_error(AsrError::ConnectTimeout);
+        let stream = map_asr_error(AsrError::StreamTimeout);
+        assert_eq!(connect, stream);
+        assert!(connect.contains("connect to Soniox"));
+    }
+
+    #[test]
+    fn map_asr_error_unauthorized_points_to_settings() {
+        let msg = map_asr_error(AsrError::Unauthorized);
+        assert!(msg.contains("invalid"));
+        assert!(msg.contains("Settings"));
+    }
+
+    #[test]
+    fn map_asr_error_402_is_balance_message() {
+        let msg = map_asr_error(AsrError::ServerError {
+            code: 402,
+            message: "ignored".to_owned(),
+        });
+        assert!(msg.contains("balance"));
+    }
+
+    #[test]
+    fn map_asr_error_other_server_error_includes_code_and_message() {
+        let msg = map_asr_error(AsrError::ServerError {
+            code: 500,
+            message: "boom".to_owned(),
+        });
+        assert!(msg.contains("500"));
+        assert!(msg.contains("boom"));
+    }
+
+    #[test]
+    fn map_asr_error_fallback_is_generic() {
+        let msg = map_asr_error(AsrError::Stream("low level detail".to_owned()));
+        // Internal details must not leak into the user-facing message.
+        assert!(!msg.contains("low level detail"));
+        assert!(msg.contains("Speech recognition failed"));
+    }
+}

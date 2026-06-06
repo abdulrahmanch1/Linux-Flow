@@ -207,3 +207,61 @@ pub async fn transcribe(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deserializes a single Soniox WebSocket message exactly as `read_task`
+    /// does, so the field-level tests below exercise the real wire contract.
+    fn parse(json: &str) -> SonioxResponse {
+        serde_json::from_str(json).expect("valid Soniox JSON")
+    }
+
+    #[test]
+    fn missing_fields_use_serde_defaults() {
+        let resp = parse("{}");
+        assert!(resp.tokens.is_empty());
+        assert!(!resp.finished);
+        assert_eq!(resp.error_code, 0);
+        assert!(resp.error_message.is_empty());
+    }
+
+    #[test]
+    fn only_final_tokens_count_toward_transcript() {
+        let resp = parse(
+            r#"{"tokens":[
+                {"text":"hello ","is_final":true},
+                {"text":"wor","is_final":false},
+                {"text":"world","is_final":true}
+            ]}"#,
+        );
+        let transcript: String = resp
+            .tokens
+            .iter()
+            .filter(|t| t.is_final)
+            .map(|t| t.text.as_str())
+            .collect();
+        assert_eq!(transcript, "hello world");
+    }
+
+    #[test]
+    fn finished_flag_is_parsed() {
+        let resp = parse(r#"{"finished":true}"#);
+        assert!(resp.finished);
+    }
+
+    #[test]
+    fn unauthorized_error_code_is_surfaced() {
+        let resp = parse(r#"{"error_code":401,"error_message":"bad key"}"#);
+        assert_eq!(resp.error_code, 401);
+        assert_eq!(resp.error_message, "bad key");
+    }
+
+    #[test]
+    fn server_error_code_and_message_are_parsed() {
+        let resp = parse(r#"{"error_code":402,"error_message":"no balance"}"#);
+        assert_eq!(resp.error_code, 402);
+        assert_eq!(resp.error_message, "no balance");
+    }
+}
