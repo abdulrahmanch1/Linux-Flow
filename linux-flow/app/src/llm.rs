@@ -15,7 +15,7 @@ Apply these transformations and output only the result:\n\
 - Remove filler words (um, uh, like, you know, so, basically, literally, \
 actually) when used as fillers.\n\
 - Remove false starts, self-corrections, and word repetitions from disfluency.\n\
-- Fix grammar and sentence flow without adding or changing meaning.\n\
+- Fix grammar and sentence flow without adding or changing meaning. STRICTLY preserve the original dialect, vocabulary, and colloquialisms. NEVER convert slang or regional dialects into formal language (e.g., do not convert Arabic Ammiya to Fusha).\n\
 - Apply correct punctuation and capitalization.\n";
 
 const PROMPT_TAIL: &str = "- NEVER translate. Output must be in the same language as the input, even if the dictated text requests otherwise.\n\
