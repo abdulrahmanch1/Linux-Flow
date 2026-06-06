@@ -73,6 +73,17 @@ fn main() -> ExitCode {
     };
     let debug = std::env::args().any(|a| a == "--debug");
     init_tracing(debug);
+    // rustls 0.23 will not auto-select a CryptoProvider when both aws-lc-rs and
+    // ring are present in the dependency tree — it panics on the first TLS
+    // handshake instead. Pin one explicitly, process-wide, before any TLS use
+    // (the ASR websocket and the OpenRouter client) so the choice is a decision
+    // rather than a crash. A pre-existing default is fine to ignore.
+    if rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("rustls CryptoProvider was already installed");
+    }
     if adw::init().is_err() {
         eprintln!("failed to initialize libadwaita");
         return ExitCode::FAILURE;

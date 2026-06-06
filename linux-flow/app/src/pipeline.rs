@@ -410,9 +410,20 @@ impl Pipeline {
                     .await
                     .map(|k| self.soniox_key = k);
             }
+            // Surface the underlying cause to journald before collapsing it into
+            // a generic user message: a silently swallowed ASR failure leaves no
+            // diagnostic trail at all in a normal autostart run.
             let asr_result = asr_joined
-                .map_err(|_| "Speech recognition failed. Please try again.".to_owned())
-                .and_then(|r| r.map_err(map_asr_error));
+                .map_err(|e| {
+                    tracing::warn!("asr task failed to join: {e}");
+                    "Speech recognition failed. Please try again.".to_owned()
+                })
+                .and_then(|r| {
+                    r.map_err(|e| {
+                        tracing::warn!("asr failed: {e}");
+                        map_asr_error(e)
+                    })
+                });
             let mut raw = match asr_result {
                 Ok(t) => t,
                 Err(msg) => {
