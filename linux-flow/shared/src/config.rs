@@ -48,7 +48,7 @@ pub struct Llm {
 impl Default for Llm {
     fn default() -> Self {
         Self {
-            model: "google/gemini-2.0-flash-lite-001".into(),
+            model: "google/gemini-2.5-flash-lite".into(),
             message_splitting: false,
         }
     }
