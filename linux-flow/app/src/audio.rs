@@ -134,9 +134,12 @@ fn capture_loop(
         },
     )?;
     let ml = Rc::clone(&mainloop);
+    // The trailing `false` is a one-shot "already warned" flag: a lagging
+    // consumer is logged exactly once, never from every callback (this fires
+    // hundreds of times a second).
     let _listener = stream
-        .add_local_listener_with_user_data((pcm_tx, stop, ml, Some(ready_tx)))
-        .process(|stream, (tx, stop, ml, ready)| {
+        .add_local_listener_with_user_data((pcm_tx, stop, ml, Some(ready_tx), false))
+        .process(|stream, (tx, stop, ml, ready, warned)| {
             if stop.load(Ordering::Acquire) {
                 ml.quit();
                 return;
@@ -149,7 +152,28 @@ fn capture_loop(
                     let sz = d.chunk().size() as usize;
                     if sz > 0 {
                         if let Some(raw) = d.data() {
-                            let _ = tx.blocking_send(raw[..sz].to_vec());
+                            // Never block this PipeWire loop thread: a blocking
+                            // send would stall the real-time graph (xruns,
+                            // frozen capture) whenever the ASR consumer falls
+                            // behind. Apply backpressure by dropping samples
+                            // instead — a transient network stall costs a few
+                            // frames, not a wedged capture loop.
+                            match tx.try_send(raw[..sz].to_vec()) {
+                                Ok(()) => {}
+                                Err(mpsc::error::TrySendError::Full(_)) => {
+                                    if !*warned {
+                                        *warned = true;
+                                        tracing::warn!(
+                                            "audio: capture buffer full — ASR consumer lagging, dropping samples"
+                                        );
+                                    }
+                                }
+                                Err(mpsc::error::TrySendError::Closed(_)) => {
+                                    // Consumer gone (ASR task ended/aborted);
+                                    // stop the loop rather than spin uselessly.
+                                    ml.quit();
+                                }
+                            }
                         }
                     }
                 }
