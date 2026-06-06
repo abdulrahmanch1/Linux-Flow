@@ -1,3 +1,12 @@
+[graph]
+# This is a Linux-only project (pipewire, uinput, wayland, x11). Only evaluate
+# Linux targets so Windows/macOS-only transitive deps (e.g. uds_windows, which
+# pulls the banned tempfile) don't enter the graph.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
 [advisories]
 # Deny all crates with known security vulnerabilities.
 version = 2
@@ -7,23 +16,24 @@ ignore = []
 
 [licenses]
 version = 2
-# Licenses compatible with GPL-3.0 (project license).
+# Licenses compatible with GPL-3.0 (project license). Under licenses v2 the
+# allow-list is exhaustive: any crate whose license is not listed here is
+# denied. (The old deny/copyleft/allow-osi-fsf-free/default keys were removed
+# in cargo-deny — that exact "deny everything not allowed" behavior is now the
+# built-in default.)
 allow = [
+    "GPL-3.0",           # this project's own crates
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Unicode-DFS-2016",
-    "Zlib",
-    "GPL-3.0",
-    "LGPL-2.1",
+    "Unicode-3.0",       # icu_* (via url/idna); supersedes Unicode-DFS-2016
+    "CC0-1.0",           # notify (public-domain dedication)
+    "CDLA-Permissive-2.0", # webpki-roots CA bundle data
+    "Unlicense",         # ksni (public domain)
 ]
-deny = []
-copyleft = "warn"
-allow-osi-fsf-free = "neither"
-default = "deny"
 confidence-threshold = 0.8
 
 [bans]
