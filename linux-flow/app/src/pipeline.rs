@@ -160,12 +160,17 @@ pub struct Pipeline {
 impl Pipeline {
     pub async fn new(config: Config) -> Result<Self, PipelineError> {
         let llm = LlmClient::new().map_err(|e| PipelineError::LlmInit(e.to_string()))?;
-        let soniox_key = secrets::resolve_key("SONIOX_API_KEY", "soniox")
-            .await
-            .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
-        let or_key = secrets::resolve_key("OPENROUTER_API_KEY", "openrouter")
-            .await
-            .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
+        // Load both keys over a single Secret Service session so cold start pays
+        // one D-Bus connect + unlock rather than one round trip per key.
+        let keys = secrets::resolve_keys(&[
+            ("SONIOX_API_KEY", "soniox"),
+            ("OPENROUTER_API_KEY", "openrouter"),
+        ])
+        .await
+        .map_err(|e| PipelineError::KeyLoad(e.to_string()))?;
+        let [soniox_key, or_key] = keys
+            .try_into()
+            .map_err(|_| PipelineError::KeyLoad("expected exactly two resolved keys".to_owned()))?;
         let ipc = IpcClient::new();
         let (config_tx, config_rx) = mpsc::channel::<Config>(4);
         let _config_watcher: Option<notify::RecommendedWatcher> = (|| {
