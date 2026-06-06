@@ -192,3 +192,83 @@ impl LlmClient {
         Ok(Zeroizing::new(text))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_prompt_uses_single_line_policy() {
+        let p = system_prompt(false);
+        assert!(p.contains("SINGLE line"));
+        assert!(!p.contains("split the text into multiple short lines"));
+    }
+
+    #[test]
+    fn splitting_prompt_uses_multi_line_policy() {
+        let p = system_prompt(true);
+        assert!(p.contains("split the text into multiple short lines"));
+        assert!(!p.contains("SINGLE line"));
+    }
+
+    #[test]
+    fn prompt_always_wraps_head_and_tail() {
+        for splitting in [false, true] {
+            let p = system_prompt(splitting);
+            assert!(p.starts_with(PROMPT_HEAD));
+            assert!(p.ends_with(PROMPT_TAIL));
+            // The no-translation guarantee lives in the tail and must persist.
+            assert!(p.contains("NEVER translate"));
+        }
+    }
+
+    #[test]
+    fn payload_serializes_expected_shape() {
+        let messages = [
+            ChatMessage {
+                role: "system",
+                content: "sys",
+            },
+            ChatMessage {
+                role: "user",
+                content: "hi",
+            },
+        ];
+        let payload = Payload {
+            model: "some/model",
+            messages: &messages,
+            provider: Provider { sort: "throughput" },
+        };
+        let v: serde_json::Value = serde_json::to_value(&payload).expect("serialize");
+        assert_eq!(v["model"], "some/model");
+        assert_eq!(v["provider"]["sort"], "throughput");
+        assert_eq!(v["messages"][0]["role"], "system");
+        assert_eq!(v["messages"][1]["content"], "hi");
+    }
+
+    #[test]
+    fn response_extracts_first_choice_content() {
+        let body: OrResponse =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":"cleaned text"}}]}"#)
+                .expect("deserialize");
+        let content = body
+            .choices
+            .first()
+            .and_then(|c| c.message.content.as_deref());
+        assert_eq!(content, Some("cleaned text"));
+    }
+
+    #[test]
+    fn response_tolerates_null_content() {
+        let body: OrResponse =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":null}}]}"#)
+                .expect("deserialize");
+        assert!(body.choices[0].message.content.is_none());
+    }
+
+    #[test]
+    fn response_tolerates_empty_choices() {
+        let body: OrResponse = serde_json::from_str(r#"{"choices":[]}"#).expect("deserialize");
+        assert!(body.choices.is_empty());
+    }
+}
