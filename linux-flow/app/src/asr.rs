@@ -212,8 +212,8 @@ pub async fn transcribe(
 mod tests {
     use super::*;
 
-    /// Mirrors the per-message handling inside `read_task`: accumulates only
-    /// final tokens and surfaces error/finished signals.
+    /// Deserializes a single Soniox WebSocket message exactly as `read_task`
+    /// does, so the field-level tests below exercise the real wire contract.
     fn parse(json: &str) -> SonioxResponse {
         serde_json::from_str(json).expect("valid Soniox JSON")
     }
