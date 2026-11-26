@@ -6,7 +6,7 @@ use linux_flow_shared::display::DisplayServer;
 /// Selects how synthesized text reaches the focused window. Clipboard insertion
 /// is opt-in because it replaces the user's selection and may enter its history.
 pub enum TextInjector {
-    /// Paste a complete UTF-8 selection with one physical keyboard shortcut.
+    /// Paste a complete UTF-8 selection with one keyboard shortcut.
     Clipboard(DisplayServer),
     /// Wayland virtual keyboard with a dynamic per-run XKB keymap.
     /// Layout-independent and Unicode-complete.

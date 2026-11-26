@@ -13,25 +13,28 @@ pub fn paste(inner: &mut Inner, text: &str, display: DisplayServer) -> Result<()
     if text.is_empty() {
         return Ok(());
     }
-    let shift = match std::env::var("LINUX_FLOW_PASTE_SHORTCUT").as_deref() {
-        Ok("ctrl-shift-v") => true,
-        Ok("ctrl-v") | Err(std::env::VarError::NotPresent) => false,
+    let shortcut_override = match std::env::var("LINUX_FLOW_PASTE_SHORTCUT").as_deref() {
+        Ok("ctrl-shift-v") => Some(true),
+        Ok("ctrl-v") => Some(false),
+        Ok("auto") | Err(std::env::VarError::NotPresent) => None,
         _ => {
             return Err(DaemonError::InjectionFailed(
-                "LINUX_FLOW_PASTE_SHORTCUT must be ctrl-v or ctrl-shift-v".into(),
+                "LINUX_FLOW_PASTE_SHORTCUT must be auto, ctrl-v or ctrl-shift-v".into(),
             ));
         }
     };
     match display {
-        DisplayServer::Wayland => crate::wayland_clipboard::copy(text)?,
-        DisplayServer::X11 => copy_x11(text)?,
+        DisplayServer::Wayland => crate::wayland_clipboard::paste(text, shortcut_override),
+        DisplayServer::X11 => {
+            copy_x11(text)?;
+            paste_shortcut(inner, shortcut_override.unwrap_or(false))
+        }
         DisplayServer::Unknown => {
             return Err(DaemonError::InjectionFailed(
                 "clipboard requires a Wayland or X11 session".into(),
             ));
         }
     }
-    paste_shortcut(inner, shift)
 }
 
 fn copy_x11(text: &str) -> Result<(), DaemonError> {
