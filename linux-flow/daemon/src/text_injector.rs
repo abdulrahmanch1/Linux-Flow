@@ -3,9 +3,11 @@ use crate::wayland_vk::VirtualKeyboard;
 use crate::{error::DaemonError, uinput_inner::Inner};
 use linux_flow_shared::display::DisplayServer;
 
-/// Selects how synthesized text reaches the focused window. All paths type the
-/// text directly — no clipboard, no paste shortcut.
+/// Selects how synthesized text reaches the focused window. Clipboard insertion
+/// is opt-in because it replaces the user's selection and may enter its history.
 pub enum TextInjector {
+    /// Paste a complete UTF-8 selection with one physical keyboard shortcut.
+    Clipboard(DisplayServer),
     /// Wayland virtual keyboard with a dynamic per-run XKB keymap.
     /// Layout-independent and Unicode-complete.
     Wayland(VirtualKeyboard),
@@ -18,6 +20,10 @@ pub enum TextInjector {
 
 impl TextInjector {
     pub fn new(display: DisplayServer) -> Self {
+        if std::env::var("LINUX_FLOW_INJECTION_METHOD").as_deref() == Ok("clipboard") {
+            eprintln!("linux-flow-helper: text injector = clipboard ({display:?})");
+            return TextInjector::Clipboard(display);
+        }
         match display {
             DisplayServer::Wayland => {
                 match VirtualKeyboard::new() {
@@ -50,11 +56,11 @@ impl TextInjector {
         }
     }
 
-    /// Types `text` into the target window.
+    /// Inserts `text` into the target window.
     ///
-    /// `x11_window` identifies the X11/XWayland window captured at hotkey press.
-    /// When `Some(id)`, xdotool targets it explicitly — reliable for XWayland
-    /// apps (Chrome, Firefox on GNOME Wayland).
+    /// The app refocuses a captured X11/XWayland window before calling the helper.
+    /// Direct typing can additionally target `x11_window`; clipboard mode pastes
+    /// into the currently focused field and never falls back to partial typing.
     pub fn fire(
         &mut self,
         inner: &mut Inner,
@@ -62,6 +68,7 @@ impl TextInjector {
         x11_window: Option<u64>,
     ) -> Result<(), DaemonError> {
         match self {
+            TextInjector::Clipboard(display) => crate::clipboard::paste(inner, text, *display),
             TextInjector::Wayland(vk) => {
                 // For an XWayland target, xdotool reaches it most reliably; otherwise
                 // the virtual keyboard is primary. Each tier is attempted only when the

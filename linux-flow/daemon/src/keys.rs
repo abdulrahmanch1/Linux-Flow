@@ -3,6 +3,10 @@ pub const EV_SYN: u16 = 0x00;
 pub const EV_KEY: u16 = 0x01;
 pub const SYN_REPORT: u16 = 0;
 
+pub const KEY_ESC: u16 = 1;
+pub const KEY_BACKSPACE: u16 = 14;
+pub const KEY_TAB: u16 = 15;
+
 // Number row (evdev order: 1=2 .. 9=10, 0=11)
 pub const KEY_1: u16 = 2;
 pub const KEY_2: u16 = 3;

@@ -8,6 +8,9 @@ StartLimitBurst=5
 Type=simple
 ExecStart=/usr/local/lib/linux-flow/linux-flow-helper
 PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR
+# Opt-in: replaces the clipboard; its history manager may retain dictated text.
+# Environment=LINUX_FLOW_INJECTION_METHOD=clipboard
+# For terminal-focused workflows, also set LINUX_FLOW_PASTE_SHORTCUT=ctrl-shift-v.
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal
