@@ -1,3 +1,4 @@
+mod clipboard;
 mod error;
 mod inject_backends;
 mod keymap;
@@ -8,6 +9,9 @@ mod text_injector;
 mod uinput;
 mod uinput_inner;
 mod vk_util;
+mod wayland_clipboard;
+mod wayland_focus;
+mod wayland_shortcut;
 mod wayland_vk;
 
 use std::sync::Arc;

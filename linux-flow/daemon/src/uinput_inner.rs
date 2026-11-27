@@ -11,6 +11,11 @@ pub const UI_DEV_SETUP: c_ulong = 0x405C5503;
 pub const BUS_VIRTUAL: u16 = 0x06;
 
 pub const ALL_KEYS: &[u16] = &[
+    // udev's ID_INPUT_KEYBOARD heuristic requires the complete keycode 1..=31
+    // block. Without Escape, Backspace and Tab, libinput ignores this as a keyboard.
+    keys::KEY_ESC,
+    keys::KEY_BACKSPACE,
+    keys::KEY_TAB,
     keys::KEY_A,
     keys::KEY_B,
     keys::KEY_C,
